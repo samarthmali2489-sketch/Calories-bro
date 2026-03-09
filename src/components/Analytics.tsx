@@ -40,13 +40,19 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
         Current Weight: ${currentWeight}
       `;
       
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+      const responseStream = await ai.models.generateContentStream({
+        model: 'gemini-3.1-pro-preview',
         contents: `Context: ${context}\n\nUser Question: ${userMsg}\n\nYou are Cal.ai, an intelligent nutrition assistant. Provide a helpful, concise, and encouraging response based on the user's data. Use markdown for formatting.`,
       });
       
-      if (response.text) {
-        setChatMessages(prev => [...prev, { role: 'model', text: response.text }]);
+      setChatMessages(prev => [...prev, { role: 'model', text: '' }]);
+      
+      for await (const chunk of responseStream) {
+        setChatMessages(prev => {
+          const newMessages = [...prev];
+          newMessages[newMessages.length - 1].text += chunk.text;
+          return newMessages;
+        });
       }
     } catch (error) {
       console.error('Chat error:', error);
@@ -114,7 +120,7 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
           Calories: ${consumedCalories}/${targets.calories}kcal
         `;
         const response = await ai.models.generateContent({
-          model: 'gemini-3-flash-preview',
+          model: 'gemini-3.1-pro-preview',
           contents: `Context: ${context}\n\nProvide a single, short, punchy sentence (max 15 words) of actionable advice or encouragement based on this nutrition data.`,
         });
         if (response.text) setAiInsight(response.text);

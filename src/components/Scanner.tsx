@@ -1,0 +1,418 @@
+import React, { useState, useRef } from 'react';
+import { useAppContext } from '../context/AppContext';
+import { GoogleGenAI, Type } from '@google/genai';
+
+interface ScannerProps {
+  onNavigate: (screen: string) => void;
+}
+
+export default function Scanner({ onNavigate }: ScannerProps) {
+  const { addEntry } = useAppContext();
+  const [showManual, setShowManual] = useState(false);
+  const [name, setName] = useState('');
+  const [calories, setCalories] = useState('');
+  const [protein, setProtein] = useState('');
+  const [carbs, setCarbs] = useState('');
+  const [fats, setFats] = useState('');
+  const [type, setType] = useState<'food' | 'activity'>('food');
+
+  const [contextDetails, setContextDetails] = useState('');
+  const [contextAmount, setContextAmount] = useState('');
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [scannedFood, setScannedFood] = useState<{
+    name: string;
+    calories: number;
+    protein: number;
+    carbs: number;
+    fats: number;
+  } | null>(null);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleEditManually = () => {
+    if (scannedFood) {
+      setName(scannedFood.name);
+      setCalories(scannedFood.calories.toString());
+      setProtein(scannedFood.protein.toString());
+      setCarbs(scannedFood.carbs.toString());
+      setFats(scannedFood.fats.toString());
+      setType('food');
+    }
+    setShowManual(true);
+  };
+
+  const handleLogMeal = () => {
+    if (scannedFood) {
+      addEntry({
+        id: crypto.randomUUID(),
+        type: 'food',
+        name: scannedFood.name,
+        calories: scannedFood.calories,
+        protein: scannedFood.protein,
+        carbs: scannedFood.carbs,
+        fats: scannedFood.fats,
+        timestamp: new Date().toISOString(),
+        category: 'Meal'
+      });
+      onNavigate('dashboard');
+    }
+  };
+
+  const handleManualSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (name && calories) {
+      addEntry({
+        id: crypto.randomUUID(),
+        type,
+        name,
+        calories: type === 'activity' ? -Math.abs(Number(calories)) : Number(calories),
+        protein: protein ? Number(protein) : undefined,
+        carbs: carbs ? Number(carbs) : undefined,
+        fats: fats ? Number(fats) : undefined,
+        timestamp: new Date().toISOString(),
+        category: type === 'activity' ? 'Activity' : 'Custom'
+      });
+      onNavigate('dashboard');
+    }
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Create a preview URL
+    const url = URL.createObjectURL(file);
+    setImageUrl(url);
+    setIsAnalyzing(true);
+    setScannedFood(null);
+
+    try {
+      // Convert file to base64
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onloadend = async () => {
+        const base64data = reader.result as string;
+        const base64String = base64data.split(',')[1];
+
+        // Call Gemini API
+        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+        
+        const response = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: {
+            parts: [
+              {
+                inlineData: {
+                  mimeType: file.type,
+                  data: base64String,
+                },
+              },
+              {
+                text: `Analyze this food image and provide the nutritional breakdown. Estimate the portion size from the image. ${
+                  contextDetails || contextAmount 
+                    ? `The user provided this additional context: ${contextDetails ? 'Food details: ' + contextDetails + '. ' : ''}${contextAmount ? 'Amount: ' + contextAmount + '.' : ''} Please use this context to provide a highly accurate nutritional breakdown.` 
+                    : ''
+                }`,
+              },
+            ],
+          },
+          config: {
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                name: { type: Type.STRING, description: 'Name of the food' },
+                calories: { type: Type.INTEGER, description: 'Estimated total calories' },
+                protein: { type: Type.INTEGER, description: 'Estimated protein in grams' },
+                carbs: { type: Type.INTEGER, description: 'Estimated carbohydrates in grams' },
+                fats: { type: Type.INTEGER, description: 'Estimated fats in grams' },
+              },
+              required: ['name', 'calories', 'protein', 'carbs', 'fats'],
+            },
+          },
+        });
+
+        if (response.text) {
+          const result = JSON.parse(response.text);
+          setScannedFood(result);
+        }
+        setIsAnalyzing(false);
+      };
+    } catch (error) {
+      console.error('Error analyzing image:', error);
+      setIsAnalyzing(false);
+      alert('Failed to analyze image. Please try again.');
+    }
+  };
+
+  if (showManual) {
+    return (
+      <div className="relative min-h-[100dvh] w-full max-w-md mx-auto bg-background-dark p-6 overflow-y-auto pb-24">
+        <header className="flex items-center justify-between mb-8 pt-2">
+          <button onClick={() => setShowManual(false)} className="w-10 h-10 rounded-full glass flex items-center justify-center hover:bg-white/10 transition-colors">
+            <span className="material-symbols-outlined text-xl">arrow_back</span>
+          </button>
+          <h1 className="text-xl font-bold tracking-tight text-primary">Manual Entry</h1>
+          <div className="w-10"></div>
+        </header>
+
+        <form onSubmit={handleManualSubmit} className="space-y-6">
+          <div className="flex bg-white/5 p-1 rounded-xl">
+            <button 
+              type="button"
+              onClick={() => setType('food')} 
+              className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${type === 'food' ? 'bg-primary text-background-dark' : 'text-slate-400'}`}
+            >
+              Food
+            </button>
+            <button 
+              type="button"
+              onClick={() => setType('activity')} 
+              className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${type === 'activity' ? 'bg-primary text-background-dark' : 'text-slate-400'}`}
+            >
+              Activity
+            </button>
+          </div>
+
+          <div className="space-y-4">
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 ml-1">Name</label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/20 focus:outline-none focus:border-primary/50 transition-colors"
+                placeholder={type === 'food' ? "e.g. Chicken Salad" : "e.g. Running"}
+                required
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 ml-1">Calories (kcal)</label>
+              <input
+                type="number"
+                value={calories}
+                onChange={(e) => setCalories(e.target.value)}
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/20 focus:outline-none focus:border-primary/50 transition-colors"
+                placeholder="e.g. 350"
+                required
+              />
+            </div>
+
+            {type === 'food' && (
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 ml-1">Protein (g)</label>
+                  <input
+                    type="number"
+                    value={protein}
+                    onChange={(e) => setProtein(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/20 focus:outline-none focus:border-primary/50 transition-colors"
+                    placeholder="0"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 ml-1">Carbs (g)</label>
+                  <input
+                    type="number"
+                    value={carbs}
+                    onChange={(e) => setCarbs(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/20 focus:outline-none focus:border-primary/50 transition-colors"
+                    placeholder="0"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 ml-1">Fats (g)</label>
+                  <input
+                    type="number"
+                    value={fats}
+                    onChange={(e) => setFats(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/20 focus:outline-none focus:border-primary/50 transition-colors"
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button
+            type="submit"
+            className="w-full bg-primary text-background-dark font-bold rounded-xl py-3.5 mt-6 hover:bg-white transition-colors shadow-[0_0_20px_rgba(255,255,255,0.2)]"
+          >
+            Save Entry
+          </button>
+        </form>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative h-[100dvh] w-full max-w-md mx-auto bg-cover bg-center overflow-hidden" 
+         style={{ backgroundImage: `url('${imageUrl || 'https://lh3.googleusercontent.com/aida-public/AB6AXuBR2eh3E1AbrnepIjFPO8gW0Wxfu_HmL2GpA_elqepKKYVVadYp7CRRsegm2nNEWYLyrzFoXUm8pu0Bsw3W6_CfUmSNajyyVXxOJRwEnvpvNiu_7PT5vt4GgqNfrM1IY64odnUmMZgaLanLqkQLnrdIQbHQsfDIU9wj6DSP0eQwDuqP9Zy88mrJsXpgwmy7E1AtEm39NkMgoP0mBl0zCP80IJWl4dSgDfo9LfHzuFvpxXGuly-LVzxg8SLoLNmXjTnFT8zK5u6ei6o'}')` }}>
+      
+      {/* Dark Overlay for better UI contrast */}
+      <div className="absolute inset-0 bg-black/30"></div>
+      
+      {/* Header Controls */}
+      <div className="absolute top-0 left-0 right-0 flex items-center justify-between p-6 z-20">
+        <button onClick={() => onNavigate('dashboard')} className="flex items-center justify-center size-10 rounded-full bg-black/20 backdrop-blur-md border border-white/10">
+          <span className="material-symbols-outlined text-white">close</span>
+        </button>
+        <div className="px-4 py-1.5 rounded-full bg-black/20 backdrop-blur-md border border-white/10">
+          <h2 className="text-white text-sm font-semibold tracking-widest uppercase">Cal.ai</h2>
+        </div>
+        <button className="flex items-center justify-center size-10 rounded-full bg-black/20 backdrop-blur-md border border-white/10">
+          <span className="material-symbols-outlined text-white">flashlight_on</span>
+        </button>
+      </div>
+      
+      {/* Scanning HUD / Brackets */}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div className="relative w-72 h-72">
+          {/* Top Left Bracket */}
+          <div className="absolute top-0 left-0 w-8 h-8 border-t-2 border-l-2 viewport-bracket"></div>
+          {/* Top Right Bracket */}
+          <div className="absolute top-0 right-0 w-8 h-8 border-t-2 border-r-2 viewport-bracket"></div>
+          {/* Bottom Left Bracket */}
+          <div className="absolute bottom-0 left-0 w-8 h-8 border-b-2 border-l-2 viewport-bracket"></div>
+          {/* Bottom Right Bracket */}
+          <div className="absolute bottom-0 right-0 w-8 h-8 border-b-2 border-r-2 viewport-bracket"></div>
+          
+          {isAnalyzing && (
+            <>
+              {/* Scanning Glow Line */}
+              <div className="scan-line w-full absolute top-[40%] h-[2px]"></div>
+              
+              {/* Status Tag */}
+              <div className="absolute -bottom-12 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3 py-1 rounded-full bg-white text-black text-[10px] font-bold tracking-tighter uppercase">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-black opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-black"></span>
+                </span>
+                Analyzing Frame
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+      
+      {/* Bottom UI Section */}
+      <div className="absolute bottom-0 left-0 right-0 p-6 space-y-6 z-20">
+        
+        {/* Context Inputs */}
+        {!scannedFood && !isAnalyzing && !showManual && (
+          <div className="glass-pane rounded-2xl p-5 shadow-2xl border border-white/10">
+            <p className="text-[10px] text-white/60 font-bold uppercase tracking-widest mb-3">Help the AI (Optional)</p>
+            <div className="space-y-3">
+              <input
+                type="text"
+                value={contextDetails}
+                onChange={(e) => setContextDetails(e.target.value)}
+                placeholder="What is this? (e.g., Homemade lasagna)"
+                className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-primary/50 transition-colors"
+              />
+              <input
+                type="text"
+                value={contextAmount}
+                onChange={(e) => setContextAmount(e.target.value)}
+                placeholder="Amount (e.g., 2 slices, 300g)"
+                className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-primary/50 transition-colors"
+              />
+              <p className="text-[10px] text-primary/60 italic">Note: More details gives more accurate results.</p>
+            </div>
+          </div>
+        )}
+
+        {/* Food Identification Card (Glass Pane) */}
+        {scannedFood && (
+          <div className="glass-pane rounded-2xl p-6 shadow-2xl">
+            <div className="flex items-start justify-between mb-6">
+              <div>
+                <span className="text-[10px] font-bold text-white/50 tracking-widest uppercase mb-1 block">Identification</span>
+                <h3 className="text-white text-2xl font-light tracking-tight">{scannedFood.name}</h3>
+              </div>
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/10 border border-white/10">
+                <span className="text-white text-xs font-medium">Analyzed</span>
+              </div>
+            </div>
+            
+            {/* Nutritional Breakdown */}
+            <div className="grid grid-cols-3 gap-4 mb-8">
+              <div className="space-y-1">
+                <p className="text-[10px] text-white/40 font-medium uppercase tracking-wider">Calories</p>
+                <p className="text-white text-lg font-light">{scannedFood.calories} <span className="text-[10px] opacity-40">kcal</span></p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-[10px] text-white/40 font-medium uppercase tracking-wider">Protein</p>
+                <p className="text-white text-lg font-light">{scannedFood.protein}<span className="text-[10px] opacity-40">g</span></p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-[10px] text-white/40 font-medium uppercase tracking-wider">Fat</p>
+                <p className="text-white text-lg font-light">{scannedFood.fats}<span className="text-[10px] opacity-40">g</span></p>
+              </div>
+            </div>
+            
+            {/* Action Buttons */}
+            <div className="flex gap-3 mt-2">
+              <button onClick={handleEditManually} className="flex-1 h-14 rounded-xl border border-white/20 bg-white/5 hover:bg-white/10 transition-colors text-white text-xs font-bold tracking-widest uppercase">
+                Edit Manually
+              </button>
+              <button onClick={handleLogMeal} className="flex-[2] h-14 rounded-xl relative overflow-hidden group">
+                <div className="absolute inset-0 bg-white/90 backdrop-blur-md group-active:bg-white/100 transition-colors"></div>
+                <div className="absolute inset-0 border border-white/20 shadow-[inset_0_1px_1px_rgba(255,255,255,0.4)]"></div>
+                <span className="relative text-black text-sm font-bold tracking-widest uppercase">Log Meal</span>
+              </button>
+            </div>
+          </div>
+        )}
+        
+        {/* Secondary Controls */}
+        <div className="flex items-center justify-between px-4">
+          <input 
+            type="file" 
+            accept="image/*" 
+            className="hidden" 
+            ref={fileInputRef}
+            onChange={handleImageUpload}
+          />
+          <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center gap-2 group">
+            <div className="size-12 rounded-full border border-white/20 flex items-center justify-center bg-black/20 group-hover:bg-white/10 transition-all">
+              <span className="material-symbols-outlined text-white">image</span>
+            </div>
+            <span className="text-[10px] text-white/60 font-medium uppercase tracking-widest">Library</span>
+          </button>
+          
+          <div className="relative">
+            <button onClick={() => setShowManual(true)} className="size-16 rounded-full border-4 border-white flex items-center justify-center p-1 hover:scale-105 transition-transform">
+              <div className="size-full rounded-full bg-white/20 flex items-center justify-center">
+                <span className="material-symbols-outlined text-white">edit</span>
+              </div>
+            </button>
+          </div>
+          
+          <button onClick={() => onNavigate('history')} className="flex flex-col items-center gap-2 group">
+            <div className="size-12 rounded-full border border-white/20 flex items-center justify-center bg-black/20 group-hover:bg-white/10 transition-all">
+              <span className="material-symbols-outlined text-white">history</span>
+            </div>
+            <span className="text-[10px] text-white/60 font-medium uppercase tracking-widest">Recent</span>
+          </button>
+        </div>
+        
+        {/* Bottom Nav Bar */}
+        <div className="flex items-center justify-between px-8 py-2 bg-black/40 backdrop-blur-xl border border-white/5 rounded-full mx-4">
+          <button onClick={() => onNavigate('dashboard')} className="p-2 text-white/40 hover:text-white transition-colors">
+            <span className="material-symbols-outlined">home</span>
+          </button>
+          <button className="p-2 text-white">
+            <span className="material-symbols-outlined fill-1">crop_free</span>
+          </button>
+          <button onClick={() => onNavigate('analytics')} className="p-2 text-white/40 hover:text-white transition-colors">
+            <span className="material-symbols-outlined">analytics</span>
+          </button>
+          <button onClick={() => onNavigate('profile')} className="p-2 text-white/40 hover:text-white transition-colors">
+            <span className="material-symbols-outlined">person</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -18,6 +18,8 @@ export default function Scanner({ onNavigate }: ScannerProps) {
 
   const [contextDetails, setContextDetails] = useState('');
   const [contextAmount, setContextAmount] = useState('');
+  const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
+  const [showContextForm, setShowContextForm] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [scannedFood, setScannedFood] = useState<{
     name: string;
@@ -120,8 +122,16 @@ export default function Scanner({ onNavigate }: ScannerProps) {
     // Create a preview URL
     const url = URL.createObjectURL(file);
     setImageUrl(url);
-    setIsAnalyzing(true);
+    setPendingImageFile(file);
+    setShowContextForm(true);
     setScannedFood(null);
+  };
+
+  const analyzeImage = async () => {
+    if (!pendingImageFile) return;
+    
+    setIsAnalyzing(true);
+    setShowContextForm(false);
 
     try {
       const compressImage = (file: File): Promise<string> => {
@@ -162,7 +172,7 @@ export default function Scanner({ onNavigate }: ScannerProps) {
         });
       };
 
-      const base64String = await compressImage(file);
+      const base64String = await compressImage(pendingImageFile);
 
       // Call Gemini API
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -180,7 +190,7 @@ export default function Scanner({ onNavigate }: ScannerProps) {
             {
               text: `Analyze this food image and provide the nutritional breakdown. Estimate the portion size from the image. ${
                 contextDetails || contextAmount 
-                  ? `The user provided this additional context: ${contextDetails ? 'Food details: ' + contextDetails + '. ' : ''}${contextAmount ? 'Amount: ' + contextAmount + '.' : ''} Please use this context to provide a highly accurate nutritional breakdown.` 
+                  ? `The user provided this additional context: ${contextDetails ? 'Dish Name: ' + contextDetails + '. ' : ''}${contextAmount ? 'Quantity/Ingredients breakdown: ' + contextAmount + '.' : ''} Please strictly use this context to calculate a highly accurate nutritional breakdown, especially if specific weights or ingredients are provided.` 
                   : ''
               }`,
             },
@@ -207,9 +217,11 @@ export default function Scanner({ onNavigate }: ScannerProps) {
         setScannedFood(result);
       }
       setIsAnalyzing(false);
+      setPendingImageFile(null);
     } catch (error) {
       console.error('Error analyzing image:', error);
       setIsAnalyzing(false);
+      setPendingImageFile(null);
       alert('Failed to analyze image. Please try again.');
     }
   };
@@ -379,26 +391,52 @@ export default function Scanner({ onNavigate }: ScannerProps) {
       {/* Bottom UI Section */}
       <div className="absolute bottom-0 left-0 right-0 p-6 space-y-6 z-20">
         
-        {/* Context Inputs */}
-        {!scannedFood && !isAnalyzing && !showManual && (
-          <div className="glass-pane rounded-2xl p-5 shadow-2xl border border-white/10">
-            <p className="text-[10px] text-white/60 font-bold uppercase tracking-widest mb-3">Help the AI (Optional)</p>
-            <div className="space-y-3">
-              <input
-                type="text"
-                value={contextDetails}
-                onChange={(e) => setContextDetails(e.target.value)}
-                placeholder="What is this? (e.g., Homemade lasagna)"
-                className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-primary/50 transition-colors"
-              />
-              <input
-                type="text"
-                value={contextAmount}
-                onChange={(e) => setContextAmount(e.target.value)}
-                placeholder="Amount (e.g., 2 slices, 300g)"
-                className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-primary/50 transition-colors"
-              />
-              <p className="text-[10px] text-primary/60 italic">Note: More details gives more accurate results.</p>
+        {/* Context Form (After Image Upload) */}
+        {showContextForm && (
+          <div className="glass-pane rounded-2xl p-6 shadow-2xl border border-white/10 animate-in slide-in-from-bottom-4">
+            <h3 className="text-white font-bold text-lg mb-2">Dish Details</h3>
+            <p className="text-xs text-white/60 mb-4">Help the AI identify complex dishes and exact portions for better accuracy.</p>
+            
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">Dish Name (Optional)</label>
+                <input
+                  type="text"
+                  value={contextDetails}
+                  onChange={(e) => setContextDetails(e.target.value)}
+                  placeholder="e.g. Chicken Biryani"
+                  className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-primary/50 transition-colors"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">Quantity / Details (Optional)</label>
+                <input
+                  type="text"
+                  value={contextAmount}
+                  onChange={(e) => setContextAmount(e.target.value)}
+                  placeholder="e.g. 500 gm (400 gm rice, 100 gm chicken)"
+                  className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-primary/50 transition-colors"
+                />
+              </div>
+              
+              <div className="flex gap-3 pt-2">
+                <button 
+                  onClick={() => {
+                    setShowContextForm(false);
+                    setImageUrl(null);
+                    setPendingImageFile(null);
+                  }} 
+                  className="flex-1 py-3 rounded-xl border border-white/20 bg-white/5 hover:bg-white/10 transition-colors text-white text-xs font-bold tracking-widest uppercase"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={analyzeImage} 
+                  className="flex-[2] py-3 rounded-xl bg-primary text-background-dark text-xs font-bold tracking-widest uppercase hover:bg-white transition-colors shadow-[0_0_20px_rgba(255,255,255,0.2)]"
+                >
+                  Analyze Food
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -447,44 +485,46 @@ export default function Scanner({ onNavigate }: ScannerProps) {
         )}
         
         {/* Secondary Controls */}
-        <div className="flex items-center justify-between px-4">
-          <input 
-            type="file" 
-            accept="image/*" 
-            className="hidden" 
-            ref={fileInputRef}
-            onChange={handleImageUpload}
-          />
-          <input 
-            type="file" 
-            accept="image/*" 
-            capture="environment"
-            className="hidden" 
-            ref={cameraInputRef}
-            onChange={handleImageUpload}
-          />
-          <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center gap-2 group">
-            <div className="size-12 rounded-full border border-white/20 flex items-center justify-center bg-black/20 group-hover:bg-white/10 transition-all">
-              <span className="material-symbols-outlined text-white">image</span>
-            </div>
-            <span className="text-[10px] text-white/60 font-medium uppercase tracking-widest">Library</span>
-          </button>
-          
-          <div className="relative">
-            <button onClick={() => cameraInputRef.current?.click()} className="size-16 rounded-full border-4 border-white flex items-center justify-center p-1 hover:scale-105 transition-transform">
-              <div className="size-full rounded-full bg-white/20 flex items-center justify-center">
-                <span className="material-symbols-outlined text-white">photo_camera</span>
+        {!showContextForm && !scannedFood && !isAnalyzing && (
+          <div className="flex items-center justify-between px-4">
+            <input 
+              type="file" 
+              accept="image/*" 
+              className="hidden" 
+              ref={fileInputRef}
+              onChange={handleImageUpload}
+            />
+            <input 
+              type="file" 
+              accept="image/*" 
+              capture="environment"
+              className="hidden" 
+              ref={cameraInputRef}
+              onChange={handleImageUpload}
+            />
+            <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center gap-2 group">
+              <div className="size-12 rounded-full border border-white/20 flex items-center justify-center bg-black/20 group-hover:bg-white/10 transition-all">
+                <span className="material-symbols-outlined text-white">image</span>
               </div>
+              <span className="text-[10px] text-white/60 font-medium uppercase tracking-widest">Library</span>
+            </button>
+            
+            <div className="relative">
+              <button onClick={() => cameraInputRef.current?.click()} className="size-16 rounded-full border-4 border-white flex items-center justify-center p-1 hover:scale-105 transition-transform">
+                <div className="size-full rounded-full bg-white/20 flex items-center justify-center">
+                  <span className="material-symbols-outlined text-white">photo_camera</span>
+                </div>
+              </button>
+            </div>
+            
+            <button onClick={() => setShowManual(true)} className="flex flex-col items-center gap-2 group">
+              <div className="size-12 rounded-full border border-white/20 flex items-center justify-center bg-black/20 group-hover:bg-white/10 transition-all">
+                <span className="material-symbols-outlined text-white">edit</span>
+              </div>
+              <span className="text-[10px] text-white/60 font-medium uppercase tracking-widest">Manual</span>
             </button>
           </div>
-          
-          <button onClick={() => setShowManual(true)} className="flex flex-col items-center gap-2 group">
-            <div className="size-12 rounded-full border border-white/20 flex items-center justify-center bg-black/20 group-hover:bg-white/10 transition-all">
-              <span className="material-symbols-outlined text-white">edit</span>
-            </div>
-            <span className="text-[10px] text-white/60 font-medium uppercase tracking-widest">Manual</span>
-          </button>
-        </div>
+        )}
         
         {/* Bottom Nav Bar */}
         <div className="flex items-center justify-between px-8 py-2 bg-black/40 backdrop-blur-xl border border-white/5 rounded-full mx-4">

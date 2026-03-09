@@ -5,6 +5,13 @@
   --color-background-light: #f7f7f7;
   --color-background-dark: #0a0a0a;
   --font-display: "Inter", sans-serif;
+  
+  --animate-gradient-slow: gradient 8s ease infinite;
+  @keyframes gradient {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
 }
 
 @layer utilities {

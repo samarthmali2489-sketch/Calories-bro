@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { UserProfile, MacroTarget, Entry, WeightEntry, User } from '../types';
+import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import { UserProfile, MacroTarget, Entry, WeightEntry, User, AppNotification } from '../types';
 import { supabase } from '../lib/supabase';
 
 interface AppState {
@@ -15,6 +15,9 @@ interface AppState {
   isOnboarded: boolean;
   completeOnboarding: () => void;
   loading: boolean;
+  notifications: AppNotification[];
+  markNotificationAsRead: (id: string) => void;
+  clearAllNotifications: () => void;
 }
 
 const defaultTargets: MacroTarget = {
@@ -34,6 +37,105 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [isOnboarded, setIsOnboardedState] = useState(false);
   const [targets, setTargets] = useState<MacroTarget>(defaultTargets);
   const [loading, setLoading] = useState(true);
+  const [readNotificationIds, setReadNotificationIds] = useState<string[]>([]);
+  const [clearedNotificationIds, setClearedNotificationIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    const read = localStorage.getItem('readNotifications');
+    if (read) setReadNotificationIds(JSON.parse(read));
+    const cleared = localStorage.getItem('clearedNotifications');
+    if (cleared) setClearedNotificationIds(JSON.parse(cleared));
+  }, []);
+
+  const markNotificationAsRead = (id: string) => {
+    if (!readNotificationIds.includes(id)) {
+      const newRead = [...readNotificationIds, id];
+      setReadNotificationIds(newRead);
+      localStorage.setItem('readNotifications', JSON.stringify(newRead));
+    }
+  };
+
+  const clearAllNotifications = () => {
+    const allIds = notifications.map(n => n.id);
+    const newCleared = [...new Set([...clearedNotificationIds, ...allIds])];
+    setClearedNotificationIds(newCleared);
+    localStorage.setItem('clearedNotifications', JSON.stringify(newCleared));
+  };
+
+  const notifications = useMemo(() => {
+    if (!profile) return [];
+    
+    const notifs: AppNotification[] = [];
+    const today = new Date().toISOString().split('T')[0];
+    const todaysEntries = entries.filter(e => e.timestamp.startsWith(today));
+    
+    // 1. No meals logged today
+    if (todaysEntries.length === 0 && new Date().getHours() > 10) {
+      notifs.push({
+        id: `no-meals-${today}`,
+        title: "Don't forget to log!",
+        message: "You haven't logged any meals today. Keep your streak going!",
+        timestamp: new Date().toISOString(),
+        read: false,
+        type: 'alert'
+      });
+    }
+
+    // 2. Calorie limit
+    const consumedCalories = todaysEntries.filter(e => e.type === 'food').reduce((sum, e) => sum + e.calories, 0);
+    if (consumedCalories > targets.calories * 0.9 && consumedCalories <= targets.calories) {
+      notifs.push({
+        id: `cal-limit-${today}`,
+        title: "Approaching Calorie Limit",
+        message: `You are at ${Math.round((consumedCalories/targets.calories)*100)}% of your daily calorie goal.`,
+        timestamp: new Date().toISOString(),
+        read: false,
+        type: 'info'
+      });
+    }
+
+    // 3. Hit protein goal
+    const consumedProtein = todaysEntries.reduce((sum, e) => sum + (e.protein || 0), 0);
+    if (consumedProtein >= targets.protein && targets.protein > 0) {
+      notifs.push({
+        id: `protein-goal-${today}`,
+        title: "Protein Goal Met! 🎉",
+        message: "Great job! You've hit your daily protein target.",
+        timestamp: new Date().toISOString(),
+        read: false,
+        type: 'success'
+      });
+    }
+
+    // 4. Weight reminder
+    const lastWeight = weightHistory.length > 0 ? weightHistory[weightHistory.length - 1] : null;
+    if (!lastWeight || (new Date().getTime() - new Date(lastWeight.date).getTime()) > 7 * 24 * 60 * 60 * 1000) {
+      notifs.push({
+        id: `weight-reminder-${today}`,
+        title: "Time for a weigh-in",
+        message: "It's been a while since you logged your weight. Update it to track your progress!",
+        timestamp: new Date().toISOString(),
+        read: false,
+        type: 'info'
+      });
+    }
+    
+    // 5. Welcome notification
+    notifs.push({
+      id: `welcome-notif`,
+      title: "Welcome to Cal.ai",
+      message: "Your AI-powered nutrition journey begins here. Try scanning a meal!",
+      timestamp: new Date(Date.now() - 86400000).toISOString(),
+      read: false,
+      type: 'info'
+    });
+
+    // Filter out cleared ones and mark read ones
+    return notifs
+      .filter(n => !clearedNotificationIds.includes(n.id))
+      .map(n => ({ ...n, read: readNotificationIds.includes(n.id) }))
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }, [profile, entries, targets, weightHistory, readNotificationIds, clearedNotificationIds]);
 
   useEffect(() => {
     // Check active sessions and sets the user
@@ -228,7 +330,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       addWeight,
       isOnboarded,
       completeOnboarding,
-      loading
+      loading,
+      notifications,
+      markNotificationAsRead,
+      clearAllNotifications
     }}>
       {children}
     </AppContext.Provider>

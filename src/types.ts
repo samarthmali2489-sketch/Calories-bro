@@ -40,3 +40,12 @@ export interface WeightEntry {
   date: string; // YYYY-MM-DD
   weight: number;
 }
+
+export interface AppNotification {
+  id: string;
+  title: string;
+  message: string;
+  timestamp: string;
+  read: boolean;
+  type: 'alert' | 'info' | 'success';
+}

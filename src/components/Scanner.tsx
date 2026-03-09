@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { GoogleGenAI, Type } from '@google/genai';
 
@@ -28,6 +28,43 @@ export default function Scanner({ onNavigate }: ScannerProps) {
   } | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const [isFlashlightOn, setIsFlashlightOn] = useState(false);
+  const videoTrackRef = useRef<MediaStreamTrack | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (videoTrackRef.current) {
+        videoTrackRef.current.stop();
+      }
+    };
+  }, []);
+
+  const toggleFlashlight = async () => {
+    try {
+      if (!videoTrackRef.current) {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' }
+        });
+        videoTrackRef.current = stream.getVideoTracks()[0];
+      }
+
+      const track = videoTrackRef.current;
+      const capabilities = track.getCapabilities() as any;
+      
+      if (capabilities.torch) {
+        await track.applyConstraints({
+          advanced: [{ torch: !isFlashlightOn }]
+        } as any);
+        setIsFlashlightOn(!isFlashlightOn);
+      } else {
+        alert('Flashlight is not supported on this device.');
+      }
+    } catch (err) {
+      console.error('Error accessing flashlight:', err);
+      alert('Could not access the camera/flashlight. Please ensure permissions are granted.');
+    }
+  };
 
   const handleEditManually = () => {
     if (scannedFood) {
@@ -246,8 +283,17 @@ export default function Scanner({ onNavigate }: ScannerProps) {
   }
 
   return (
-    <div className="relative h-[100dvh] w-full max-w-md mx-auto bg-cover bg-center overflow-hidden" 
-         style={{ backgroundImage: `url('${imageUrl || 'https://lh3.googleusercontent.com/aida-public/AB6AXuBR2eh3E1AbrnepIjFPO8gW0Wxfu_HmL2GpA_elqepKKYVVadYp7CRRsegm2nNEWYLyrzFoXUm8pu0Bsw3W6_CfUmSNajyyVXxOJRwEnvpvNiu_7PT5vt4GgqNfrM1IY64odnUmMZgaLanLqkQLnrdIQbHQsfDIU9wj6DSP0eQwDuqP9Zy88mrJsXpgwmy7E1AtEm39NkMgoP0mBl0zCP80IJWl4dSgDfo9LfHzuFvpxXGuly-LVzxg8SLoLNmXjTnFT8zK5u6ei6o'}')` }}>
+    <div className="relative h-[100dvh] w-full max-w-md mx-auto overflow-hidden bg-background-dark">
+      
+      {/* Animated Gradient Background */}
+      {!imageUrl && (
+        <div className="absolute inset-0 bg-gradient-to-br from-background-dark via-primary/10 to-background-dark animate-gradient-slow bg-[length:200%_200%]"></div>
+      )}
+      
+      {/* Image Background */}
+      {imageUrl && (
+        <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url('${imageUrl}')` }}></div>
+      )}
       
       {/* Dark Overlay for better UI contrast */}
       <div className="absolute inset-0 bg-black/30"></div>
@@ -260,8 +306,11 @@ export default function Scanner({ onNavigate }: ScannerProps) {
         <div className="px-4 py-1.5 rounded-full bg-black/20 backdrop-blur-md border border-white/10">
           <h2 className="text-white text-sm font-semibold tracking-widest uppercase">Cal.ai</h2>
         </div>
-        <button className="flex items-center justify-center size-10 rounded-full bg-black/20 backdrop-blur-md border border-white/10">
-          <span className="material-symbols-outlined text-white">flashlight_on</span>
+        <button 
+          onClick={toggleFlashlight}
+          className={`flex items-center justify-center size-10 rounded-full backdrop-blur-md border transition-colors ${isFlashlightOn ? 'bg-white text-black border-white' : 'bg-black/20 text-white border-white/10'}`}
+        >
+          <span className="material-symbols-outlined">{isFlashlightOn ? 'flashlight_off' : 'flashlight_on'}</span>
         </button>
       </div>
       
@@ -374,6 +423,14 @@ export default function Scanner({ onNavigate }: ScannerProps) {
             ref={fileInputRef}
             onChange={handleImageUpload}
           />
+          <input 
+            type="file" 
+            accept="image/*" 
+            capture="environment"
+            className="hidden" 
+            ref={cameraInputRef}
+            onChange={handleImageUpload}
+          />
           <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center gap-2 group">
             <div className="size-12 rounded-full border border-white/20 flex items-center justify-center bg-black/20 group-hover:bg-white/10 transition-all">
               <span className="material-symbols-outlined text-white">image</span>
@@ -382,18 +439,18 @@ export default function Scanner({ onNavigate }: ScannerProps) {
           </button>
           
           <div className="relative">
-            <button onClick={() => setShowManual(true)} className="size-16 rounded-full border-4 border-white flex items-center justify-center p-1 hover:scale-105 transition-transform">
+            <button onClick={() => cameraInputRef.current?.click()} className="size-16 rounded-full border-4 border-white flex items-center justify-center p-1 hover:scale-105 transition-transform">
               <div className="size-full rounded-full bg-white/20 flex items-center justify-center">
-                <span className="material-symbols-outlined text-white">edit</span>
+                <span className="material-symbols-outlined text-white">photo_camera</span>
               </div>
             </button>
           </div>
           
-          <button onClick={() => onNavigate('history')} className="flex flex-col items-center gap-2 group">
+          <button onClick={() => setShowManual(true)} className="flex flex-col items-center gap-2 group">
             <div className="size-12 rounded-full border border-white/20 flex items-center justify-center bg-black/20 group-hover:bg-white/10 transition-all">
-              <span className="material-symbols-outlined text-white">history</span>
+              <span className="material-symbols-outlined text-white">edit</span>
             </div>
-            <span className="text-[10px] text-white/60 font-medium uppercase tracking-widest">Recent</span>
+            <span className="text-[10px] text-white/60 font-medium uppercase tracking-widest">Manual</span>
           </button>
         </div>
         

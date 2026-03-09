@@ -6,7 +6,8 @@ interface ProfileProps {
 }
 
 export default function Profile({ onNavigate }: ProfileProps) {
-  const { profile, logout } = useAppContext();
+  const { profile, logout, notifications } = useAppContext();
+  const unreadCount = notifications.filter(n => !n.read).length;
 
   if (!profile) return null;
 
@@ -14,9 +15,17 @@ export default function Profile({ onNavigate }: ProfileProps) {
     <div className="relative flex min-h-[100dvh] w-full flex-col bg-background-dark overflow-x-hidden pb-24 max-w-md mx-auto">
       <header className="flex items-center justify-between px-6 pt-8 pb-4 sticky top-0 z-50 bg-background-dark/80 backdrop-blur-md">
         <h1 className="text-xl font-bold tracking-tight text-primary">Profile</h1>
-        <button onClick={() => onNavigate('dashboard')} className="w-10 h-10 rounded-full glass flex items-center justify-center hover:bg-white/10 transition-colors">
-          <span className="material-symbols-outlined text-xl">close</span>
-        </button>
+        <div className="flex gap-2">
+          <button onClick={() => onNavigate('notifications')} className="w-10 h-10 rounded-full glass flex items-center justify-center hover:bg-white/10 transition-colors relative">
+            <span className="material-symbols-outlined text-xl">notifications</span>
+            {unreadCount > 0 && (
+              <span className="absolute top-0 right-0 size-3 bg-red-500 rounded-full border-2 border-background-dark"></span>
+            )}
+          </button>
+          <button onClick={() => onNavigate('dashboard')} className="w-10 h-10 rounded-full glass flex items-center justify-center hover:bg-white/10 transition-colors">
+            <span className="material-symbols-outlined text-xl">close</span>
+          </button>
+        </div>
       </header>
 
       <main className="px-6 space-y-6">

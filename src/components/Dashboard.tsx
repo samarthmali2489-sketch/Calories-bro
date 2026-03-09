@@ -6,7 +6,8 @@ interface DashboardProps {
 }
 
 export default function Dashboard({ onNavigate }: DashboardProps) {
-  const { profile, entries, targets } = useAppContext();
+  const { profile, entries, targets, notifications } = useAppContext();
+  const unreadCount = notifications.filter(n => !n.read).length;
 
   // Calculate today's totals
   const today = new Date().toISOString().split('T')[0];
@@ -49,8 +50,11 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
             <h2 className="text-xl font-bold tracking-tight">Cal.ai</h2>
           </div>
         </div>
-        <button className="size-10 glass rounded-full flex items-center justify-center">
-          <span className="material-symbols-outlined text-[20px]">search</span>
+        <button onClick={() => onNavigate('notifications')} className="size-10 glass rounded-full flex items-center justify-center relative hover:bg-white/10 transition-colors">
+          <span className="material-symbols-outlined text-[20px]">notifications</span>
+          {unreadCount > 0 && (
+            <span className="absolute top-0 right-0 size-3 bg-red-500 rounded-full border-2 border-background-dark"></span>
+          )}
         </button>
       </header>
       

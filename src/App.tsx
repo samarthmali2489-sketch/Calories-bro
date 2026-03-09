@@ -7,8 +7,10 @@ import Scanner from './components/Scanner';
 import Analytics from './components/Analytics';
 import Profile from './components/Profile';
 import History from './components/History';
+import Notifications from './components/Notifications';
+import { Analytics as VercelAnalytics } from '@vercel/analytics/react';
 
-type Screen = 'onboarding' | 'dashboard' | 'scanner' | 'analytics' | 'profile' | 'history';
+type Screen = 'onboarding' | 'dashboard' | 'scanner' | 'analytics' | 'profile' | 'history' | 'notifications';
 
 function AppContent() {
   const { user, isOnboarded, loading } = useAppContext();
@@ -50,6 +52,7 @@ function AppContent() {
       {currentScreen === 'analytics' && <Analytics onNavigate={handleNavigate} />}
       {currentScreen === 'profile' && <Profile onNavigate={handleNavigate} />}
       {currentScreen === 'history' && <History onNavigate={handleNavigate} />}
+      {currentScreen === 'notifications' && <Notifications onNavigate={handleNavigate} />}
     </div>
   );
 }
@@ -58,6 +61,7 @@ export default function App() {
   return (
     <AppProvider>
       <AppContent />
+      <VercelAnalytics />
     </AppProvider>
   );
 }

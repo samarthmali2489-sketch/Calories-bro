@@ -41,7 +41,7 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
       `;
       
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3-flash-preview',
         contents: `Context: ${context}\n\nUser Question: ${userMsg}\n\nYou are Cal.ai, an intelligent nutrition assistant. Provide a helpful, concise, and encouraging response based on the user's data. Use markdown for formatting.`,
       });
       
@@ -114,7 +114,7 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
           Calories: ${consumedCalories}/${targets.calories}kcal
         `;
         const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
+          model: 'gemini-3-flash-preview',
           contents: `Context: ${context}\n\nProvide a single, short, punchy sentence (max 15 words) of actionable advice or encouragement based on this nutrition data.`,
         });
         if (response.text) setAiInsight(response.text);

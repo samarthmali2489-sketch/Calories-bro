@@ -124,57 +124,89 @@ export default function Scanner({ onNavigate }: ScannerProps) {
     setScannedFood(null);
 
     try {
-      // Convert file to base64
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onloadend = async () => {
-        const base64data = reader.result as string;
-        const base64String = base64data.split(',')[1];
+      const compressImage = (file: File): Promise<string> => {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.readAsDataURL(file);
+          reader.onload = (event) => {
+            const img = new Image();
+            img.src = event.target?.result as string;
+            img.onload = () => {
+              const canvas = document.createElement('canvas');
+              const MAX_WIDTH = 1024;
+              const MAX_HEIGHT = 1024;
+              let width = img.width;
+              let height = img.height;
 
-        // Call Gemini API
-        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-        
-        const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: {
-            parts: [
-              {
-                inlineData: {
-                  mimeType: file.type,
-                  data: base64String,
-                },
-              },
-              {
-                text: `Analyze this food image and provide the nutritional breakdown. Estimate the portion size from the image. ${
-                  contextDetails || contextAmount 
-                    ? `The user provided this additional context: ${contextDetails ? 'Food details: ' + contextDetails + '. ' : ''}${contextAmount ? 'Amount: ' + contextAmount + '.' : ''} Please use this context to provide a highly accurate nutritional breakdown.` 
-                    : ''
-                }`,
-              },
-            ],
-          },
-          config: {
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                name: { type: Type.STRING, description: 'Name of the food' },
-                calories: { type: Type.INTEGER, description: 'Estimated total calories' },
-                protein: { type: Type.INTEGER, description: 'Estimated protein in grams' },
-                carbs: { type: Type.INTEGER, description: 'Estimated carbohydrates in grams' },
-                fats: { type: Type.INTEGER, description: 'Estimated fats in grams' },
-              },
-              required: ['name', 'calories', 'protein', 'carbs', 'fats'],
-            },
-          },
+              if (width > height) {
+                if (width > MAX_WIDTH) {
+                  height *= MAX_WIDTH / width;
+                  width = MAX_WIDTH;
+                }
+              } else {
+                if (height > MAX_HEIGHT) {
+                  width *= MAX_HEIGHT / height;
+                  height = MAX_HEIGHT;
+                }
+              }
+              canvas.width = width;
+              canvas.height = height;
+              const ctx = canvas.getContext('2d');
+              ctx?.drawImage(img, 0, 0, width, height);
+              const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+              resolve(dataUrl.split(',')[1]);
+            };
+            img.onerror = (error) => reject(error);
+          };
+          reader.onerror = (error) => reject(error);
         });
-
-        if (response.text) {
-          const result = JSON.parse(response.text);
-          setScannedFood(result);
-        }
-        setIsAnalyzing(false);
       };
+
+      const base64String = await compressImage(file);
+
+      // Call Gemini API
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: {
+          parts: [
+            {
+              inlineData: {
+                mimeType: 'image/jpeg',
+                data: base64String,
+              },
+            },
+            {
+              text: `Analyze this food image and provide the nutritional breakdown. Estimate the portion size from the image. ${
+                contextDetails || contextAmount 
+                  ? `The user provided this additional context: ${contextDetails ? 'Food details: ' + contextDetails + '. ' : ''}${contextAmount ? 'Amount: ' + contextAmount + '.' : ''} Please use this context to provide a highly accurate nutritional breakdown.` 
+                  : ''
+              }`,
+            },
+          ],
+        },
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              name: { type: Type.STRING, description: 'Name of the food' },
+              calories: { type: Type.INTEGER, description: 'Estimated total calories' },
+              protein: { type: Type.INTEGER, description: 'Estimated protein in grams' },
+              carbs: { type: Type.INTEGER, description: 'Estimated carbohydrates in grams' },
+              fats: { type: Type.INTEGER, description: 'Estimated fats in grams' },
+            },
+            required: ['name', 'calories', 'protein', 'carbs', 'fats'],
+          },
+        },
+      });
+
+      if (response.text) {
+        const result = JSON.parse(response.text);
+        setScannedFood(result);
+      }
+      setIsAnalyzing(false);
     } catch (error) {
       console.error('Error analyzing image:', error);
       setIsAnalyzing(false);

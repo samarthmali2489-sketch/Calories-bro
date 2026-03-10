@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
 import { UserProfile, MacroTarget, Entry, WeightEntry, User, AppNotification } from '../types';
 import { supabase } from '../lib/supabase';
-import { GoogleGenAI, Type } from '@google/genai';
+import { generateAIContent } from '../lib/ai';
+import { Type } from '@google/genai';
 
 interface AppState {
   user: User | null;
@@ -19,6 +20,7 @@ interface AppState {
   notifications: AppNotification[];
   markNotificationAsRead: (id: string) => void;
   clearAllNotifications: () => void;
+  isSupabaseConfigured: boolean;
 }
 
 const defaultTargets: MacroTarget = {
@@ -43,8 +45,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [readNotificationIds, setReadNotificationIds] = useState<string[]>([]);
   const [clearedNotificationIds, setClearedNotificationIds] = useState<string[]>([]);
+  const [isSupabaseConfigured, setIsSupabaseConfigured] = useState(!!supabase);
 
   useEffect(() => {
+    if (!supabase) {
+      setIsSupabaseConfigured(false);
+      setLoading(false);
+      return;
+    }
     const read = localStorage.getItem('readNotifications');
     if (read) setReadNotificationIds(JSON.parse(read));
     const cleared = localStorage.getItem('clearedNotifications');
@@ -142,6 +150,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [profile, entries, targets, weightHistory, readNotificationIds, clearedNotificationIds]);
 
   useEffect(() => {
+    if (!supabase) return;
+
     // Check active sessions and sets the user
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
@@ -171,6 +181,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const fetchUserData = async (userId: string) => {
+    if (!supabase) return;
     setLoading(true);
     try {
       // Fetch Profile
@@ -189,6 +200,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           height: profileData.height,
           weight: profileData.weight,
         });
+        if (profileData.targets) {
+          setTargets(profileData.targets);
+        }
         setIsOnboardedState(profileData.is_onboarded || false);
       }
 
@@ -254,8 +268,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const fallbackCarbs = Math.round((fallbackCalories - (fallbackProtein * 4) - (fallbackFats * 9)) / 4);
 
       try {
-        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-        const response = await ai.models.generateContent({
+        const response = await generateAIContent({
           model: 'gemini-3.1-flash-lite-preview',
           contents: `User Profile: ${JSON.stringify(profile)}\n\nCalculate the optimal daily calorie and macro targets (protein, carbs, fats) for this user based on their profile and goal. Provide the results in JSON format.`,
           config: {
@@ -278,6 +291,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           setTargets(aiTargets);
           localStorage.setItem('macroTargets', JSON.stringify(aiTargets));
           localStorage.setItem('lastProfileKey', profileKey);
+          
+          // Save to Supabase if user is logged in
+          if (user && supabase) {
+            await supabase.from('profiles').update({ targets: aiTargets }).eq('id', user.id);
+          }
         } else {
           const fb = { calories: fallbackCalories, protein: fallbackProtein, carbs: fallbackCarbs, fats: fallbackFats };
           setTargets(fb);
@@ -298,7 +316,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const setProfile = async (newProfile: UserProfile) => {
     setProfileState(newProfile);
-    if (user) {
+    if (user && supabase) {
       await supabase.from('profiles').upsert({
         id: user.id,
         name: newProfile.name,
@@ -315,7 +333,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const addEntry = async (entry: Entry) => {
     setEntriesState(prev => [entry, ...prev].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
-    if (user) {
+    if (user && supabase) {
       await supabase.from('entries').insert({
         id: entry.id,
         user_id: user.id,
@@ -344,7 +362,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setProfileState({ ...profile, weight });
     }
 
-    if (user) {
+    if (user && supabase) {
       // Check if weight entry exists for date
       const { data } = await supabase.from('weight_history').select('id').eq('user_id', user.id).eq('date', date).single();
       
@@ -365,13 +383,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const completeOnboarding = async () => {
     setIsOnboardedState(true);
-    if (user) {
+    if (user && supabase) {
       await supabase.from('profiles').update({ is_onboarded: true }).eq('id', user.id);
     }
   };
 
   const logout = async () => {
-    await supabase.auth.signOut();
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
   };
 
   return (
@@ -390,7 +410,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       loading,
       notifications,
       markNotificationAsRead,
-      clearAllNotifications
+      clearAllNotifications,
+      isSupabaseConfigured
     }}>
       {children}
     </AppContext.Provider>

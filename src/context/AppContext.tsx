@@ -20,6 +20,7 @@ interface AppState {
   notifications: AppNotification[];
   markNotificationAsRead: (id: string) => void;
   clearAllNotifications: () => void;
+  isSupabaseConfigured: boolean;
 }
 
 const defaultTargets: MacroTarget = {
@@ -44,8 +45,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [readNotificationIds, setReadNotificationIds] = useState<string[]>([]);
   const [clearedNotificationIds, setClearedNotificationIds] = useState<string[]>([]);
+  const [isSupabaseConfigured, setIsSupabaseConfigured] = useState(!!supabase);
 
   useEffect(() => {
+    if (!supabase) {
+      setIsSupabaseConfigured(false);
+      setLoading(false);
+      return;
+    }
     const read = localStorage.getItem('readNotifications');
     if (read) setReadNotificationIds(JSON.parse(read));
     const cleared = localStorage.getItem('clearedNotifications');
@@ -143,6 +150,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [profile, entries, targets, weightHistory, readNotificationIds, clearedNotificationIds]);
 
   useEffect(() => {
+    if (!supabase) return;
+
     // Check active sessions and sets the user
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
@@ -172,6 +181,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const fetchUserData = async (userId: string) => {
+    if (!supabase) return;
     setLoading(true);
     try {
       // Fetch Profile
@@ -283,7 +293,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           localStorage.setItem('lastProfileKey', profileKey);
           
           // Save to Supabase if user is logged in
-          if (user) {
+          if (user && supabase) {
             await supabase.from('profiles').update({ targets: aiTargets }).eq('id', user.id);
           }
         } else {
@@ -306,7 +316,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const setProfile = async (newProfile: UserProfile) => {
     setProfileState(newProfile);
-    if (user) {
+    if (user && supabase) {
       await supabase.from('profiles').upsert({
         id: user.id,
         name: newProfile.name,
@@ -323,7 +333,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const addEntry = async (entry: Entry) => {
     setEntriesState(prev => [entry, ...prev].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
-    if (user) {
+    if (user && supabase) {
       await supabase.from('entries').insert({
         id: entry.id,
         user_id: user.id,
@@ -352,7 +362,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setProfileState({ ...profile, weight });
     }
 
-    if (user) {
+    if (user && supabase) {
       // Check if weight entry exists for date
       const { data } = await supabase.from('weight_history').select('id').eq('user_id', user.id).eq('date', date).single();
       
@@ -373,13 +383,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const completeOnboarding = async () => {
     setIsOnboardedState(true);
-    if (user) {
+    if (user && supabase) {
       await supabase.from('profiles').update({ is_onboarded: true }).eq('id', user.id);
     }
   };
 
   const logout = async () => {
-    await supabase.auth.signOut();
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
   };
 
   return (
@@ -398,7 +410,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       loading,
       notifications,
       markNotificationAsRead,
-      clearAllNotifications
+      clearAllNotifications,
+      isSupabaseConfigured
     }}>
       {children}
     </AppContext.Provider>

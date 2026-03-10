@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { GoogleGenAI, Type } from '@google/genai';
+import { generateAIContent } from '../lib/ai';
+import { Type } from '@google/genai';
 
 interface ScannerProps {
   onNavigate: (screen: string) => void;
@@ -174,10 +175,8 @@ export default function Scanner({ onNavigate }: ScannerProps) {
 
       const base64String = await compressImage(pendingImageFile);
 
-      // Call Gemini API
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      
-      const response = await ai.models.generateContent({
+      // Call Server-side AI API
+      const response = await generateAIContent({
         model: 'gemini-3.1-flash-lite-preview',
         contents: {
           parts: [

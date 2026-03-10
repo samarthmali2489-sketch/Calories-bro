@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
 import { UserProfile, MacroTarget, Entry, WeightEntry, User, AppNotification } from '../types';
 import { supabase } from '../lib/supabase';
-import { GoogleGenAI, Type } from '@google/genai';
+import { generateAIContent } from '../lib/ai';
+import { Type } from '@google/genai';
 
 interface AppState {
   user: User | null;
@@ -189,6 +190,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           height: profileData.height,
           weight: profileData.weight,
         });
+        if (profileData.targets) {
+          setTargets(profileData.targets);
+        }
         setIsOnboardedState(profileData.is_onboarded || false);
       }
 
@@ -254,8 +258,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const fallbackCarbs = Math.round((fallbackCalories - (fallbackProtein * 4) - (fallbackFats * 9)) / 4);
 
       try {
-        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-        const response = await ai.models.generateContent({
+        const response = await generateAIContent({
           model: 'gemini-3.1-flash-lite-preview',
           contents: `User Profile: ${JSON.stringify(profile)}\n\nCalculate the optimal daily calorie and macro targets (protein, carbs, fats) for this user based on their profile and goal. Provide the results in JSON format.`,
           config: {
@@ -278,6 +281,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           setTargets(aiTargets);
           localStorage.setItem('macroTargets', JSON.stringify(aiTargets));
           localStorage.setItem('lastProfileKey', profileKey);
+          
+          // Save to Supabase if user is logged in
+          if (user) {
+            await supabase.from('profiles').update({ targets: aiTargets }).eq('id', user.id);
+          }
         } else {
           const fb = { calories: fallbackCalories, protein: fallbackProtein, carbs: fallbackCarbs, fats: fallbackFats };
           setTargets(fb);

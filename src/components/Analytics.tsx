@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { GoogleGenAI } from '@google/genai';
+import { generateAIContent, generateAIContentStream } from '../lib/ai';
 import Markdown from 'react-markdown';
 
 interface AnalyticsProps {
@@ -32,7 +32,6 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
     setIsChatLoading(true);
     
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const context = `
         User Profile: ${JSON.stringify(profile)}
         Targets: ${JSON.stringify(targets)}
@@ -40,7 +39,7 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
         Current Weight: ${currentWeight}
       `;
       
-      const responseStream = await ai.models.generateContentStream({
+      const responseStream = await generateAIContentStream({
         model: 'gemini-3.1-flash-lite-preview',
         contents: `Context: ${context}\n\nUser Question: ${userMsg}\n\nYou are Cal.ai, an intelligent nutrition assistant. Provide a helpful, concise, and encouraging response based on the user's data. Use markdown for formatting.`,
       });
@@ -128,7 +127,6 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
 
       setIsInsightLoading(true);
       try {
-        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
         const context = `
           Time Range: ${timeRange}
           Efficiency Score: ${efficiencyScore}
@@ -138,7 +136,7 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
           Calories: ${consumedCalories}/${targets.calories}kcal
           Goal: ${profile?.goal}
         `;
-        const response = await ai.models.generateContent({
+        const response = await generateAIContent({
           model: 'gemini-3.1-flash-lite-preview',
           contents: `Context: ${context}\n\nProvide a single, short, punchy sentence (max 15 words) of actionable advice or encouragement based on this nutrition data. Make it specific to their ${profile?.goal} goal.`,
         });
@@ -172,7 +170,6 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
   const fetchDeepAnalysis = async () => {
     setIsDeepAnalyzing(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const context = `
         User Profile: ${JSON.stringify(profile)}
         Targets: ${JSON.stringify(targets)}
@@ -181,7 +178,7 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
         Time Range: ${timeRange}
       `;
       
-      const response = await ai.models.generateContent({
+      const response = await generateAIContent({
         model: 'gemini-3.1-flash-lite-preview',
         contents: `Context: ${context}\n\nProvide a comprehensive "Deep Performance Analysis" for the user. 
         Include:

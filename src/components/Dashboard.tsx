@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { GoogleGenAI } from '@google/genai';
+import { generateAIContent } from '../lib/ai';
 
 interface DashboardProps {
   onNavigate: (screen: string) => void;
@@ -45,14 +45,13 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       if (aiStatus && lastData === currentData) return;
 
       try {
-        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
         const context = `
           Goal: ${profile?.goal}
           Calories: ${consumedCalories}/${targets.calories}
           Protein: ${consumedProtein}/${targets.protein}g
           Time: ${new Date().toLocaleTimeString()}
         `;
-        const response = await ai.models.generateContent({
+        const response = await generateAIContent({
           model: 'gemini-3.1-flash-lite-preview',
           contents: `Context: ${context}\n\nProvide a 3-word status for the user's progress today (e.g. "On Track", "Need More Protein", "Perfect Balance").`,
         });

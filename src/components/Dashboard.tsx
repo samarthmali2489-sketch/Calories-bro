@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
+import { GoogleGenAI } from '@google/genai';
 
 interface DashboardProps {
   onNavigate: (screen: string) => void;
@@ -8,6 +9,14 @@ interface DashboardProps {
 export default function Dashboard({ onNavigate }: DashboardProps) {
   const { profile, entries, targets, notifications } = useAppContext();
   const unreadCount = notifications.filter(n => !n.read).length;
+  const [aiStatus, setAiStatus] = useState<string | null>(() => {
+    const cached = localStorage.getItem('aiStatus');
+    const cachedTime = localStorage.getItem('aiStatusTime');
+    if (cached && cachedTime && (new Date().getTime() - Number(cachedTime) < 3600000)) {
+      return cached;
+    }
+    return null;
+  });
 
   // Calculate today's totals
   const today = new Date().toISOString().split('T')[0];
@@ -26,6 +35,41 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   const proteinPercent = Math.min(100, Math.round((consumedProtein / targets.protein) * 100)) || 0;
   const carbsPercent = Math.min(100, Math.round((consumedCarbs / targets.carbs) * 100)) || 0;
   const fatsPercent = Math.min(100, Math.round((consumedFats / targets.fats) * 100)) || 0;
+
+  useEffect(() => {
+    const fetchAiStatus = async () => {
+      // Don't fetch if we already have a recent status and data hasn't changed much
+      const lastData = localStorage.getItem('aiStatusData');
+      const currentData = JSON.stringify({ consumedCalories, consumedProtein, goal: profile?.goal });
+      
+      if (aiStatus && lastData === currentData) return;
+
+      try {
+        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+        const context = `
+          Goal: ${profile?.goal}
+          Calories: ${consumedCalories}/${targets.calories}
+          Protein: ${consumedProtein}/${targets.protein}g
+          Time: ${new Date().toLocaleTimeString()}
+        `;
+        const response = await ai.models.generateContent({
+          model: 'gemini-3.1-flash-lite-preview',
+          contents: `Context: ${context}\n\nProvide a 3-word status for the user's progress today (e.g. "On Track", "Need More Protein", "Perfect Balance").`,
+        });
+        if (response.text) {
+          const status = response.text.replace(/[".]/g, '');
+          setAiStatus(status);
+          localStorage.setItem('aiStatus', status);
+          localStorage.setItem('aiStatusTime', new Date().getTime().toString());
+          localStorage.setItem('aiStatusData', currentData);
+        }
+      } catch (e) {
+        setAiStatus("Tracking...");
+      }
+    };
+    if (todaysEntries.length > 0) fetchAiStatus();
+    else setAiStatus("Ready to log");
+  }, [consumedCalories, consumedProtein, targets, profile?.goal, todaysEntries.length]);
 
   const formatTime = (isoString: string) => {
     const date = new Date(isoString);
@@ -68,6 +112,9 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
             <span className="text-primary/60 text-sm font-medium tracking-wide uppercase">Left</span>
             <h1 className="text-6xl font-light tracking-tighter my-1">{caloriesLeft.toLocaleString()}</h1>
             <span className="text-xs text-primary/40 font-medium">of {targets.calories.toLocaleString()} kcal</span>
+            <div className="mt-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20">
+              <p className="text-[10px] font-bold text-primary uppercase tracking-widest">{aiStatus || 'Analyzing...'}</p>
+            </div>
             <div className="absolute bottom-8 flex gap-1">
               <div className="w-1 h-1 rounded-full bg-primary"></div>
               <div className="w-1 h-1 rounded-full bg-primary/30"></div>

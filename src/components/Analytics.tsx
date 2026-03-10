@@ -41,7 +41,7 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
       `;
       
       const responseStream = await ai.models.generateContentStream({
-        model: 'gemini-3.1-pro-preview',
+        model: 'gemini-3.1-flash-lite-preview',
         contents: `Context: ${context}\n\nUser Question: ${userMsg}\n\nYou are Cal.ai, an intelligent nutrition assistant. Provide a helpful, concise, and encouraging response based on the user's data. Use markdown for formatting.`,
       });
       
@@ -90,7 +90,7 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
   const carbsPercent = Math.min(100, Math.round((consumedCarbs / targets.carbs) * 100)) || 0;
   const fatsPercent = Math.min(100, Math.round((consumedFats / targets.fats) * 100)) || 0;
 
-  // Calculate Efficiency Score (based on macro adherence)
+  // Calculate Efficiency Score (based on macro adherence and consistency)
   const efficiencyScore = useMemo(() => {
     if (targets.calories === 0) return 0;
     const pScore = Math.min(100, (consumedProtein / targets.protein) * 100);
@@ -98,16 +98,34 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
     const fScore = Math.min(100, (consumedFats / targets.fats) * 100);
     const calScore = Math.min(100, (consumedCalories / targets.calories) * 100);
     
-    // Average of macro completion + calorie completion
-    const score = Math.round((pScore + cScore + fScore + calScore) / 4);
+    // Consistency factor: how many days in the range have entries
+    const daysWithEntries = new Set(filteredEntries.map(e => e.timestamp.split('T')[0])).size;
+    const consistencyFactor = (daysWithEntries / daysInRange);
+    
+    // Weighted average: 70% macro/cal completion, 30% consistency
+    const completionScore = (pScore + cScore + fScore + calScore) / 4;
+    const score = Math.round((completionScore * 0.7) + (consistencyFactor * 100 * 0.3));
+    
     return score || 0;
-  }, [consumedProtein, consumedCarbs, consumedFats, consumedCalories, targets]);
+  }, [consumedProtein, consumedCarbs, consumedFats, consumedCalories, targets, filteredEntries, daysInRange]);
 
-  const [aiInsight, setAiInsight] = useState<string | null>(null);
+  const [aiInsight, setAiInsight] = useState<string | null>(() => {
+    const cached = localStorage.getItem('aiInsight');
+    const cachedTime = localStorage.getItem('aiInsightTime');
+    if (cached && cachedTime && (new Date().getTime() - Number(cachedTime) < 3600000)) {
+      return cached;
+    }
+    return null;
+  });
   const [isInsightLoading, setIsInsightLoading] = useState(false);
 
   useEffect(() => {
     const fetchInsight = async () => {
+      const currentData = JSON.stringify({ timeRange, efficiencyScore, consumedProtein, goal: profile?.goal });
+      const lastData = localStorage.getItem('aiInsightData');
+      
+      if (aiInsight && lastData === currentData) return;
+
       setIsInsightLoading(true);
       try {
         const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -118,12 +136,18 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
           Carbs: ${consumedCarbs}/${targets.carbs}g
           Fats: ${consumedFats}/${targets.fats}g
           Calories: ${consumedCalories}/${targets.calories}kcal
+          Goal: ${profile?.goal}
         `;
         const response = await ai.models.generateContent({
-          model: 'gemini-3.1-pro-preview',
-          contents: `Context: ${context}\n\nProvide a single, short, punchy sentence (max 15 words) of actionable advice or encouragement based on this nutrition data.`,
+          model: 'gemini-3.1-flash-lite-preview',
+          contents: `Context: ${context}\n\nProvide a single, short, punchy sentence (max 15 words) of actionable advice or encouragement based on this nutrition data. Make it specific to their ${profile?.goal} goal.`,
         });
-        if (response.text) setAiInsight(response.text);
+        if (response.text) {
+          setAiInsight(response.text);
+          localStorage.setItem('aiInsight', response.text);
+          localStorage.setItem('aiInsightTime', new Date().getTime().toString());
+          localStorage.setItem('aiInsightData', currentData);
+        }
       } catch (e) {
         setAiInsight("Keep tracking your meals to get personalized insights!");
       } finally {
@@ -132,7 +156,55 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
     };
     
     fetchInsight();
-  }, [timeRange, efficiencyScore, consumedProtein, consumedCarbs, consumedFats, consumedCalories, targets]);
+  }, [timeRange, efficiencyScore, consumedProtein, consumedCarbs, consumedFats, consumedCalories, targets, profile?.goal]);
+
+  const [deepAnalysis, setDeepAnalysis] = useState<string | null>(() => {
+    const cached = localStorage.getItem('deepAnalysis');
+    const cachedTime = localStorage.getItem('deepAnalysisTime');
+    // Cache for 24 hours
+    if (cached && cachedTime && (new Date().getTime() - Number(cachedTime) < 86400000)) {
+      return cached;
+    }
+    return null;
+  });
+  const [isDeepAnalyzing, setIsDeepAnalyzing] = useState(false);
+
+  const fetchDeepAnalysis = async () => {
+    setIsDeepAnalyzing(true);
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const context = `
+        User Profile: ${JSON.stringify(profile)}
+        Targets: ${JSON.stringify(targets)}
+        Entries (Last 30 days): ${JSON.stringify(entries.slice(0, 50))}
+        Weight History: ${JSON.stringify(weightHistory)}
+        Time Range: ${timeRange}
+      `;
+      
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.1-flash-lite-preview',
+        contents: `Context: ${context}\n\nProvide a comprehensive "Deep Performance Analysis" for the user. 
+        Include:
+        1. Macro-nutrient balance analysis.
+        2. Consistency score and why.
+        3. Predicted weight trend for the next 2 weeks based on current habits.
+        4. 3 specific, actionable adjustments to reach their goal faster.
+        
+        Format the response using professional markdown with clear headings and bullet points. Keep it encouraging but data-driven.`,
+      });
+      
+      if (response.text) {
+        setDeepAnalysis(response.text);
+        localStorage.setItem('deepAnalysis', response.text);
+        localStorage.setItem('deepAnalysisTime', new Date().getTime().toString());
+      }
+    } catch (error) {
+      console.error('Deep analysis error:', error);
+      setDeepAnalysis("I couldn't generate a deep analysis right now. Please try again later.");
+    } finally {
+      setIsDeepAnalyzing(false);
+    }
+  };
 
   const currentWeight = weightHistory.length > 0 ? weightHistory[weightHistory.length - 1].weight : profile?.weight || 0;
   
@@ -405,6 +477,58 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
               </div>
             ))}
           </div>
+        </section>
+
+        {/* Deep AI Analysis Section */}
+        <section className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500 ml-1">AI Performance Report</h3>
+            {!deepAnalysis && !isDeepAnalyzing && (
+              <button 
+                onClick={fetchDeepAnalysis}
+                className="text-[10px] font-bold text-primary uppercase tracking-widest flex items-center gap-1"
+              >
+                <span className="material-symbols-outlined text-sm">analytics</span>
+                Generate Report
+              </button>
+            )}
+          </div>
+
+          {isDeepAnalyzing ? (
+            <div className="glass p-8 rounded-2xl flex flex-col items-center justify-center gap-4 border border-primary/20">
+              <div className="relative size-12">
+                <div className="absolute inset-0 border-2 border-primary/20 rounded-full"></div>
+                <div className="absolute inset-0 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+              </div>
+              <p className="text-sm text-primary/60 font-medium animate-pulse">AI is analyzing your habits...</p>
+            </div>
+          ) : deepAnalysis ? (
+            <div className="glass p-6 rounded-2xl border border-primary/20 bg-primary/5 animate-in fade-in slide-in-from-bottom-4">
+              <div className="flex justify-between items-center mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-primary">auto_awesome</span>
+                  <span className="text-xs font-bold uppercase tracking-widest text-primary">Deep Analysis</span>
+                </div>
+                <button onClick={fetchDeepAnalysis} className="text-[10px] text-slate-500 hover:text-primary transition-colors">Regenerate</button>
+              </div>
+              <div className="markdown-body prose prose-invert prose-sm max-w-none">
+                <Markdown>{deepAnalysis}</Markdown>
+              </div>
+            </div>
+          ) : (
+            <div 
+              onClick={fetchDeepAnalysis}
+              className="glass p-8 rounded-2xl flex flex-col items-center justify-center gap-3 border border-dashed border-white/10 cursor-pointer hover:border-primary/30 transition-colors group"
+            >
+              <div className="size-12 rounded-full bg-white/5 flex items-center justify-center group-hover:bg-primary/10 transition-colors">
+                <span className="material-symbols-outlined text-primary/40 group-hover:text-primary transition-colors">psychology</span>
+              </div>
+              <div className="text-center">
+                <p className="text-sm font-bold text-slate-300">Unlock Deep Analysis</p>
+                <p className="text-xs text-slate-500">Get AI-powered insights on your consistency and predicted progress.</p>
+              </div>
+            </div>
+          )}
         </section>
       </main>
       

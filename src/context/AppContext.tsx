@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
 import { UserProfile, MacroTarget, Entry, WeightEntry, User, AppNotification } from '../types';
 import { supabase } from '../lib/supabase';
+import { GoogleGenAI, Type } from '@google/genai';
 
 interface AppState {
   user: User | null;
@@ -35,7 +36,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [entries, setEntriesState] = useState<Entry[]>([]);
   const [weightHistory, setWeightHistoryState] = useState<WeightEntry[]>([]);
   const [isOnboarded, setIsOnboardedState] = useState(false);
-  const [targets, setTargets] = useState<MacroTarget>(defaultTargets);
+  const [targets, setTargets] = useState<MacroTarget>(() => {
+    const cached = localStorage.getItem('macroTargets');
+    return cached ? JSON.parse(cached) : defaultTargets;
+  });
   const [loading, setLoading] = useState(true);
   const [readNotificationIds, setReadNotificationIds] = useState<string[]>([]);
   const [clearedNotificationIds, setClearedNotificationIds] = useState<string[]>([]);
@@ -217,26 +221,79 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    if (profile) {
-      let bmr = 10 * profile.weight + 6.25 * profile.height - 5 * profile.age + 5;
+    const calculateTargets = async () => {
+      if (!profile) return;
+
+      // Check if we have cached targets for this specific profile to avoid redundant AI calls
+      const profileKey = JSON.stringify({
+        goal: profile.goal,
+        activity: profile.activityLevel,
+        age: profile.age,
+        height: profile.height,
+        weight: profile.weight
+      });
+      const cachedProfileKey = localStorage.getItem('lastProfileKey');
       
+      if (cachedProfileKey === profileKey && targets !== defaultTargets) {
+        return;
+      }
+
+      // Fallback formula
+      let bmr = 10 * profile.weight + 6.25 * profile.height - 5 * profile.age + 5;
       let multiplier = 1.2;
       if (profile.activityLevel === 'light') multiplier = 1.375;
       if (profile.activityLevel === 'moderate') multiplier = 1.55;
       if (profile.activityLevel === 'active') multiplier = 1.725;
-
       let tdee = bmr * multiplier;
-
       if (profile.goal === 'loss') tdee -= 500;
       if (profile.goal === 'gain') tdee += 300;
 
-      const calories = Math.round(tdee);
-      const protein = Math.round(profile.weight * 2.2);
-      const fats = Math.round((calories * 0.25) / 9);
-      const carbs = Math.round((calories - (protein * 4) - (fats * 9)) / 4);
+      const fallbackCalories = Math.round(tdee);
+      const fallbackProtein = Math.round(profile.weight * 2.2);
+      const fallbackFats = Math.round((fallbackCalories * 0.25) / 9);
+      const fallbackCarbs = Math.round((fallbackCalories - (fallbackProtein * 4) - (fallbackFats * 9)) / 4);
 
-      setTargets({ calories, protein, carbs, fats });
-    }
+      try {
+        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+        const response = await ai.models.generateContent({
+          model: 'gemini-3.1-flash-lite-preview',
+          contents: `User Profile: ${JSON.stringify(profile)}\n\nCalculate the optimal daily calorie and macro targets (protein, carbs, fats) for this user based on their profile and goal. Provide the results in JSON format.`,
+          config: {
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                calories: { type: Type.INTEGER },
+                protein: { type: Type.INTEGER },
+                carbs: { type: Type.INTEGER },
+                fats: { type: Type.INTEGER },
+              },
+              required: ['calories', 'protein', 'carbs', 'fats'],
+            },
+          },
+        });
+
+        if (response.text) {
+          const aiTargets = JSON.parse(response.text);
+          setTargets(aiTargets);
+          localStorage.setItem('macroTargets', JSON.stringify(aiTargets));
+          localStorage.setItem('lastProfileKey', profileKey);
+        } else {
+          const fb = { calories: fallbackCalories, protein: fallbackProtein, carbs: fallbackCarbs, fats: fallbackFats };
+          setTargets(fb);
+          localStorage.setItem('macroTargets', JSON.stringify(fb));
+          localStorage.setItem('lastProfileKey', profileKey);
+        }
+      } catch (e) {
+        console.error('AI target calculation error:', e);
+        const fb = { calories: fallbackCalories, protein: fallbackProtein, carbs: fallbackCarbs, fats: fallbackFats };
+        setTargets(fb);
+        localStorage.setItem('macroTargets', JSON.stringify(fb));
+        localStorage.setItem('lastProfileKey', profileKey);
+      }
+    };
+
+    calculateTargets();
   }, [profile]);
 
   const setProfile = async (newProfile: UserProfile) => {

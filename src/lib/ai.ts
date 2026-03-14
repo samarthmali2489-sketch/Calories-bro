@@ -10,7 +10,7 @@ function getApiKey() {
     return import.meta.env.VITE_GEMINI_API_KEY;
   }
   if (typeof process !== 'undefined' && process.env && process.env.GEMINI_API_KEY) {
-    return process.env.AIzaSyBKpCerpHcC66_NA_3gMeS4T_0V5zLLd5U;
+    return process.env.GEMINI_API_KEY;
   }
   return "";
 }
@@ -28,7 +28,7 @@ export async function generateAIContent(params: {
 
   const ai = new GoogleGenAI({ apiKey });
   const response = await ai.models.generateContent({
-    model: params.model || "gemini-3-flash-preview",
+    model: params.model || "gemini-3.1-flash-lite-preview",
     contents: params.contents,
     config: params.config,
   });
@@ -49,7 +49,7 @@ export async function generateAIContentStream(params: {
 
   const ai = new GoogleGenAI({ apiKey });
   return ai.models.generateContentStream({
-    model: params.model || "gemini-3-flash-preview",
+    model: params.model || "gemini-3.1-flash-lite-preview",
     contents: params.contents,
     config: params.config,
   });

@@ -1,13 +1,19 @@
-import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
+
+// ⚠️ PASTE YOUR GEMINI API KEY HERE
+// Example: const HARDCODED_API_KEY = "AIzaSy...";
+const HARDCODED_API_KEY = "AIzaSyBKpCerpHcC66_NA_3gMeS4T_0V5zLLd5U";
 
 export async function generateAIContent(params: {
   model?: string;
   contents: any;
   config?: any;
-}): Promise<GenerateContentResponse> {
-  const apiKey = process.env.GEMINI_API_KEY;
+}): Promise<{ text: string }> {
+  // It will try to use the environment variable first, then fall back to your hardcoded key
+  const apiKey = process.env.GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY || HARDCODED_API_KEY;
+  
   if (!apiKey) {
-    throw new Error("GEMINI_API_KEY is not configured.");
+    throw new Error("Gemini API key is missing. Please paste your key in src/lib/ai.ts");
   }
 
   const ai = new GoogleGenAI({ apiKey });
@@ -16,8 +22,8 @@ export async function generateAIContent(params: {
     contents: params.contents,
     config: params.config,
   });
-
-  return response;
+  
+  return { text: response.text || "" };
 }
 
 export async function generateAIContentStream(params: {
@@ -25,9 +31,10 @@ export async function generateAIContentStream(params: {
   contents: any;
   config?: any;
 }) {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY || HARDCODED_API_KEY;
+  
   if (!apiKey) {
-    throw new Error("GEMINI_API_KEY is not configured.");
+    throw new Error("Gemini API key is missing. Please paste your key in src/lib/ai.ts");
   }
 
   const ai = new GoogleGenAI({ apiKey });

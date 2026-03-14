@@ -4,13 +4,23 @@ import { GoogleGenAI } from "@google/genai";
 // Example: const HARDCODED_API_KEY = "AIzaSy...";
 const HARDCODED_API_KEY = "AIzaSyBKpCerpHcC66_NA_3gMeS4T_0V5zLLd5U";
 
+function getApiKey() {
+  if (HARDCODED_API_KEY) return HARDCODED_API_KEY;
+  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_GEMINI_API_KEY) {
+    return import.meta.env.VITE_GEMINI_API_KEY;
+  }
+  if (typeof process !== 'undefined' && process.env && process.env.GEMINI_API_KEY) {
+    return process.env.GEMINI_API_KEY;
+  }
+  return "";
+}
+
 export async function generateAIContent(params: {
   model?: string;
   contents: any;
   config?: any;
 }): Promise<{ text: string }> {
-  // It will try to use the environment variable first, then fall back to your hardcoded key
-  const apiKey = process.env.GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY || HARDCODED_API_KEY;
+  const apiKey = getApiKey();
   
   if (!apiKey) {
     throw new Error("Gemini API key is missing. Please paste your key in src/lib/ai.ts");
@@ -18,7 +28,7 @@ export async function generateAIContent(params: {
 
   const ai = new GoogleGenAI({ apiKey });
   const response = await ai.models.generateContent({
-    model: params.model || "gemini-3.1-flash-lite-preview",
+    model: "gemini-2.5-flash", // Force a widely available model
     contents: params.contents,
     config: params.config,
   });
@@ -31,7 +41,7 @@ export async function generateAIContentStream(params: {
   contents: any;
   config?: any;
 }) {
-  const apiKey = process.env.GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY || HARDCODED_API_KEY;
+  const apiKey = getApiKey();
   
   if (!apiKey) {
     throw new Error("Gemini API key is missing. Please paste your key in src/lib/ai.ts");
@@ -39,8 +49,9 @@ export async function generateAIContentStream(params: {
 
   const ai = new GoogleGenAI({ apiKey });
   return ai.models.generateContentStream({
-    model: params.model || "gemini-3.1-flash-lite-preview",
+    model: "gemini-2.5-flash", // Force a widely available model
     contents: params.contents,
     config: params.config,
   });
 }
+

@@ -58,7 +58,26 @@ CREATE POLICY "Users can insert own weight history" ON public.weight_history FOR
 CREATE POLICY "Users can update own weight history" ON public.weight_history FOR UPDATE USING (auth.uid() = user_id);
 CREATE POLICY "Users can delete own weight history" ON public.weight_history FOR DELETE USING (auth.uid() = user_id);
 
--- Create a trigger to create a profile on signup
+-- Create ai_data table for caching AI responses and chat history
+CREATE TABLE IF NOT EXISTS public.ai_data (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
+    type TEXT NOT NULL, -- 'insight', 'deep_analysis', 'chat_history'
+    data JSONB NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(user_id, type)
+);
+
+-- Enable RLS for ai_data
+ALTER TABLE public.ai_data ENABLE ROW LEVEL SECURITY;
+
+-- Create policies for ai_data
+CREATE POLICY "Users can view own ai_data" ON public.ai_data FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert own ai_data" ON public.ai_data FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update own ai_data" ON public.ai_data FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "Users can delete own ai_data" ON public.ai_data FOR DELETE USING (auth.uid() = user_id);
+
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN

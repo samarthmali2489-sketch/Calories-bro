@@ -5,17 +5,18 @@ import { Type } from '@google/genai';
 
 interface ScannerProps {
   onNavigate: (screen: string) => void;
+  initialMode?: 'scanner' | 'activity';
 }
 
-export default function Scanner({ onNavigate }: ScannerProps) {
+export default function Scanner({ onNavigate, initialMode = 'scanner' }: ScannerProps) {
   const { addEntry } = useAppContext();
-  const [showManual, setShowManual] = useState(false);
+  const [showManual, setShowManual] = useState(initialMode === 'activity');
   const [name, setName] = useState('');
   const [calories, setCalories] = useState('');
   const [protein, setProtein] = useState('');
   const [carbs, setCarbs] = useState('');
   const [fats, setFats] = useState('');
-  const [type, setType] = useState<'food' | 'activity'>('food');
+  const [type, setType] = useState<'food' | 'activity'>(initialMode === 'activity' ? 'activity' : 'food');
 
   const [contextDetails, setContextDetails] = useState('');
   const [contextAmount, setContextAmount] = useState('');
@@ -278,6 +279,26 @@ export default function Scanner({ onNavigate }: ScannerProps) {
               />
             </div>
 
+            {type === 'activity' && (
+              <div className="pt-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 ml-1 mb-2 block">Quick Add</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => { setName('Walking (30 min)'); setCalories('150'); }} className="bg-white/5 border border-white/10 rounded-xl py-2 px-3 text-xs text-white hover:bg-white/10 transition-colors text-left flex items-center gap-2">
+                    <span className="material-symbols-outlined text-primary text-sm">directions_walk</span> Walking
+                  </button>
+                  <button type="button" onClick={() => { setName('Running (30 min)'); setCalories('300'); }} className="bg-white/5 border border-white/10 rounded-xl py-2 px-3 text-xs text-white hover:bg-white/10 transition-colors text-left flex items-center gap-2">
+                    <span className="material-symbols-outlined text-primary text-sm">directions_run</span> Running
+                  </button>
+                  <button type="button" onClick={() => { setName('Cycling (30 min)'); setCalories('250'); }} className="bg-white/5 border border-white/10 rounded-xl py-2 px-3 text-xs text-white hover:bg-white/10 transition-colors text-left flex items-center gap-2">
+                    <span className="material-symbols-outlined text-primary text-sm">directions_bike</span> Cycling
+                  </button>
+                  <button type="button" onClick={() => { setName('Weightlifting (45 min)'); setCalories('200'); }} className="bg-white/5 border border-white/10 rounded-xl py-2 px-3 text-xs text-white hover:bg-white/10 transition-colors text-left flex items-center gap-2">
+                    <span className="material-symbols-outlined text-primary text-sm">fitness_center</span> Weights
+                  </button>
+                </div>
+              </div>
+            )}
+
             {type === 'food' && (
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-1">
@@ -485,7 +506,7 @@ export default function Scanner({ onNavigate }: ScannerProps) {
         
         {/* Secondary Controls */}
         {!showContextForm && !scannedFood && !isAnalyzing && (
-          <div className="flex items-center justify-between px-4">
+          <div className="flex items-end justify-center gap-4 px-4 pb-4">
             <input 
               type="file" 
               accept="image/*" 
@@ -501,26 +522,34 @@ export default function Scanner({ onNavigate }: ScannerProps) {
               ref={cameraInputRef}
               onChange={handleImageUpload}
             />
-            <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center gap-2 group">
-              <div className="size-12 rounded-full border border-white/20 flex items-center justify-center bg-black/20 group-hover:bg-white/10 transition-all">
+            <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center gap-2 group w-14">
+              <div className="size-12 rounded-full border border-white/20 flex items-center justify-center bg-black/40 backdrop-blur-md group-hover:bg-white/10 transition-all">
                 <span className="material-symbols-outlined text-white">image</span>
               </div>
-              <span className="text-[10px] text-white/60 font-medium uppercase tracking-widest">Library</span>
+              <span className="text-[9px] text-white/60 font-medium uppercase tracking-widest text-center">Library</span>
             </button>
             
-            <div className="relative">
-              <button onClick={() => cameraInputRef.current?.click()} className="size-16 rounded-full border-4 border-white flex items-center justify-center p-1 hover:scale-105 transition-transform">
+            <button onClick={() => { setType('food'); setShowManual(true); }} className="flex flex-col items-center gap-2 group w-14">
+              <div className="size-12 rounded-full border border-white/20 flex items-center justify-center bg-black/40 backdrop-blur-md group-hover:bg-white/10 transition-all">
+                <span className="material-symbols-outlined text-white">restaurant</span>
+              </div>
+              <span className="text-[9px] text-white/60 font-medium uppercase tracking-widest text-center">Food</span>
+            </button>
+            
+            <div className="flex flex-col items-center gap-2 mx-2">
+              <button onClick={() => cameraInputRef.current?.click()} className="size-16 rounded-full border-4 border-white flex items-center justify-center p-1 hover:scale-105 transition-transform bg-black/40 backdrop-blur-md shadow-xl">
                 <div className="size-full rounded-full bg-white/20 flex items-center justify-center">
                   <span className="material-symbols-outlined text-white">photo_camera</span>
                 </div>
               </button>
+              <span className="text-[9px] text-white/60 font-medium uppercase tracking-widest text-center">Scan</span>
             </div>
             
-            <button onClick={() => setShowManual(true)} className="flex flex-col items-center gap-2 group">
-              <div className="size-12 rounded-full border border-white/20 flex items-center justify-center bg-black/20 group-hover:bg-white/10 transition-all">
-                <span className="material-symbols-outlined text-white">edit</span>
+            <button onClick={() => { setType('activity'); setShowManual(true); }} className="flex flex-col items-center gap-2 group w-14">
+              <div className="size-12 rounded-full border border-white/20 flex items-center justify-center bg-black/40 backdrop-blur-md group-hover:bg-white/10 transition-all">
+                <span className="material-symbols-outlined text-white">fitness_center</span>
               </div>
-              <span className="text-[10px] text-white/60 font-medium uppercase tracking-widest">Manual</span>
+              <span className="text-[9px] text-white/60 font-medium uppercase tracking-widest text-center">Activity</span>
             </button>
           </div>
         )}

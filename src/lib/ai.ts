@@ -28,7 +28,7 @@ export async function generateAIContent(params: {
 
   const ai = new GoogleGenAI({ apiKey });
   const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash", // Force a widely available model
+    model: params.model || "gemini-3-flash-preview",
     contents: params.contents,
     config: params.config,
   });
@@ -49,7 +49,7 @@ export async function generateAIContentStream(params: {
 
   const ai = new GoogleGenAI({ apiKey });
   return ai.models.generateContentStream({
-    model: "gemini-2.5-flash", // Force a widely available model
+    model: params.model || "gemini-3-flash-preview",
     contents: params.contents,
     config: params.config,
   });

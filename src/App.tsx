@@ -10,7 +10,7 @@ import History from './components/History';
 import Notifications from './components/Notifications';
 import { Analytics as VercelAnalytics } from '@vercel/analytics/react';
 
-type Screen = 'onboarding' | 'dashboard' | 'scanner' | 'analytics' | 'profile' | 'history' | 'notifications';
+type Screen = 'onboarding' | 'dashboard' | 'scanner' | 'add-activity' | 'analytics' | 'profile' | 'history' | 'notifications';
 
 function AppContent() {
   const { user, isOnboarded, loading, isSupabaseConfigured } = useAppContext();
@@ -84,7 +84,8 @@ function AppContent() {
     <div className="bg-[#0a0a0a] min-h-[100dvh] text-slate-100 font-display">
       {currentScreen === 'onboarding' && <Onboarding onComplete={() => handleNavigate('dashboard')} />}
       {currentScreen === 'dashboard' && <Dashboard onNavigate={handleNavigate} />}
-      {currentScreen === 'scanner' && <Scanner onNavigate={handleNavigate} />}
+      {currentScreen === 'scanner' && <Scanner onNavigate={handleNavigate} initialMode="scanner" />}
+      {currentScreen === 'add-activity' && <Scanner onNavigate={handleNavigate} initialMode="activity" />}
       {currentScreen === 'analytics' && <Analytics onNavigate={handleNavigate} />}
       {currentScreen === 'profile' && <Profile onNavigate={handleNavigate} />}
       {currentScreen === 'history' && <History onNavigate={handleNavigate} />}

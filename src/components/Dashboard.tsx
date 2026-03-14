@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { generateAIContent } from '../lib/ai';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { format, subDays, parseISO } from 'date-fns';
 
 interface DashboardProps {
   onNavigate: (screen: string) => void;
@@ -9,6 +11,8 @@ interface DashboardProps {
 export default function Dashboard({ onNavigate }: DashboardProps) {
   const { profile, entries, targets, notifications } = useAppContext();
   const unreadCount = notifications.filter(n => !n.read).length;
+  const [selectedMacro, setSelectedMacro] = useState<'protein' | 'carbs' | 'fats' | null>(null);
+  const [macroTimeRange, setMacroTimeRange] = useState<'weekly' | 'monthly' | 'yearly'>('weekly');
   const [aiStatus, setAiStatus] = useState<string | null>(() => {
     const cached = localStorage.getItem('aiStatus');
     const cachedTime = localStorage.getItem('aiStatusTime');
@@ -75,8 +79,83 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  const getMacroData = (macro: 'protein' | 'carbs' | 'fats', range: 'weekly' | 'monthly' | 'yearly') => {
+    const days = range === 'weekly' ? 7 : range === 'monthly' ? 30 : 365;
+    const data = [];
+    const now = new Date();
+    
+    for (let i = days - 1; i >= 0; i--) {
+      const date = subDays(now, i);
+      const dateString = format(date, 'yyyy-MM-dd');
+      
+      const dayEntries = entries.filter(e => e.timestamp.startsWith(dateString));
+      const total = dayEntries.reduce((sum, e) => sum + (Number(e[macro]) || 0), 0);
+      
+      data.push({
+        date: format(date, range === 'yearly' ? 'MMM' : 'MMM d'),
+        value: total,
+      });
+    }
+    
+    // For yearly, group by month
+    if (range === 'yearly') {
+      const monthlyData: Record<string, number> = {};
+      data.forEach(d => {
+        monthlyData[d.date] = (monthlyData[d.date] || 0) + d.value;
+      });
+      return Object.entries(monthlyData).map(([date, value]) => ({ date, value }));
+    }
+    
+    return data;
+  };
+
   return (
     <div className="relative flex min-h-[100dvh] w-full flex-col max-w-md mx-auto overflow-hidden">
+      {selectedMacro && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="bg-background-dark border border-white/10 rounded-3xl w-full max-w-md p-6 shadow-2xl">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-bold capitalize">{selectedMacro} History</h3>
+              <button onClick={() => setSelectedMacro(null)} className="p-2 bg-white/5 rounded-full hover:bg-white/10 transition-colors">
+                <span className="material-symbols-outlined text-white">close</span>
+              </button>
+            </div>
+            
+            <div className="flex bg-white/5 p-1 rounded-xl mb-6">
+              {(['weekly', 'monthly', 'yearly'] as const).map((range) => (
+                <button
+                  key={range}
+                  onClick={() => setMacroTimeRange(range)}
+                  className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors capitalize ${macroTimeRange === range ? 'bg-primary text-background-dark' : 'text-slate-400 hover:text-white'}`}
+                >
+                  {range}
+                </button>
+              ))}
+            </div>
+            
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={getMacroData(selectedMacro, macroTimeRange)}>
+                  <defs>
+                    <linearGradient id="colorMacro" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#C1FF00" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="#C1FF00" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <XAxis dataKey="date" stroke="#ffffff40" fontSize={10} tickLine={false} axisLine={false} />
+                  <YAxis stroke="#ffffff40" fontSize={10} tickLine={false} axisLine={false} width={30} />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: '#141414', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }}
+                    itemStyle={{ color: '#C1FF00' }}
+                  />
+                  <Area type="monotone" dataKey="value" stroke="#C1FF00" strokeWidth={2} fillOpacity={1} fill="url(#colorMacro)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+      )}
+
       <header className="flex items-center justify-between p-6">
         <div className="flex items-center gap-3">
           <div className="size-10 rounded-full border border-primary/20 p-0.5 overflow-hidden">
@@ -123,7 +202,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
         </div>
         
         <div className="grid grid-cols-3 gap-3 my-8">
-          <div className="glass p-4 rounded-2xl flex flex-col items-center gap-2">
+          <button onClick={() => setSelectedMacro('protein')} className="glass p-4 rounded-2xl flex flex-col items-center gap-2 hover:bg-white/10 transition-colors">
             <div className="relative size-12 flex items-center justify-center">
               <svg className="absolute size-full -rotate-90" viewBox="0 0 36 36">
                 <circle className="stroke-primary/10" cx="18" cy="18" fill="none" r="16" strokeWidth="2"></circle>
@@ -135,9 +214,9 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
               <p className="text-[10px] text-primary/50 font-bold uppercase tracking-wider">Protein</p>
               <p className="text-sm font-bold">{consumedProtein}g</p>
             </div>
-          </div>
+          </button>
           
-          <div className="glass p-4 rounded-2xl flex flex-col items-center gap-2">
+          <button onClick={() => setSelectedMacro('carbs')} className="glass p-4 rounded-2xl flex flex-col items-center gap-2 hover:bg-white/10 transition-colors">
             <div className="relative size-12 flex items-center justify-center">
               <svg className="absolute size-full -rotate-90" viewBox="0 0 36 36">
                 <circle className="stroke-primary/10" cx="18" cy="18" fill="none" r="16" strokeWidth="2"></circle>
@@ -149,9 +228,9 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
               <p className="text-[10px] text-primary/50 font-bold uppercase tracking-wider">Carbs</p>
               <p className="text-sm font-bold">{consumedCarbs}g</p>
             </div>
-          </div>
+          </button>
           
-          <div className="glass p-4 rounded-2xl flex flex-col items-center gap-2">
+          <button onClick={() => setSelectedMacro('fats')} className="glass p-4 rounded-2xl flex flex-col items-center gap-2 hover:bg-white/10 transition-colors">
             <div className="relative size-12 flex items-center justify-center">
               <svg className="absolute size-full -rotate-90" viewBox="0 0 36 36">
                 <circle className="stroke-primary/10" cx="18" cy="18" fill="none" r="16" strokeWidth="2"></circle>
@@ -163,8 +242,32 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
               <p className="text-[10px] text-primary/50 font-bold uppercase tracking-wider">Fats</p>
               <p className="text-sm font-bold">{consumedFats}g</p>
             </div>
-          </div>
+          </button>
         </div>
+
+        <section className="mt-8">
+          <h3 className="text-lg font-bold tracking-tight mb-4">Quick Actions</h3>
+          <div className="grid grid-cols-2 gap-4">
+            <button 
+              onClick={() => onNavigate('scanner')} 
+              className="glass p-5 rounded-2xl flex flex-col items-center justify-center gap-3 border border-white/5 hover:border-primary/30 hover:bg-white/5 transition-all group"
+            >
+              <div className="size-12 rounded-full bg-primary/10 flex items-center justify-center group-hover:scale-110 transition-transform">
+                <span className="material-symbols-outlined text-primary text-2xl">restaurant</span>
+              </div>
+              <span className="text-sm font-bold text-slate-200">Log Food</span>
+            </button>
+            <button 
+              onClick={() => onNavigate('add-activity')} 
+              className="glass p-5 rounded-2xl flex flex-col items-center justify-center gap-3 border border-white/5 hover:border-primary/30 hover:bg-white/5 transition-all group"
+            >
+              <div className="size-12 rounded-full bg-primary/10 flex items-center justify-center group-hover:scale-110 transition-transform">
+                <span className="material-symbols-outlined text-primary text-2xl">fitness_center</span>
+              </div>
+              <span className="text-sm font-bold text-slate-200">Log Activity</span>
+            </button>
+          </div>
+        </section>
         
         <section className="mt-10">
           <div className="flex justify-between items-center mb-6">

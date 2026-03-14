@@ -2,6 +2,11 @@ import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { generateAIContent, generateAIContentStream } from '../lib/ai';
 import Markdown from 'react-markdown';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts';
+import { format, parseISO, subDays } from 'date-fns';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
+import { supabase } from '../lib/supabase';
 
 interface AnalyticsProps {
   onNavigate: (screen: string) => void;
@@ -23,12 +28,53 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
     }
   }, [chatMessages]);
 
+  useEffect(() => {
+    if (isChatOpen && chatMessages.length === 0 && supabase) {
+      const loadChatHistory = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data, error } = await supabase
+            .from('ai_data')
+            .select('data')
+            .eq('user_id', user.id)
+            .eq('type', 'chat_history')
+            .single();
+            
+          if (error) {
+            console.error('Error loading chat history:', error);
+            return;
+          }
+            
+          if (data && data.data && Array.isArray(data.data.messages)) {
+            setChatMessages(data.data.messages);
+          }
+        }
+      };
+      loadChatHistory();
+    }
+  }, [isChatOpen]);
+
+  const saveChatHistory = async (messages: {role: 'user' | 'model', text: string}[]) => {
+    if (supabase) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { error } = await supabase.from('ai_data').upsert({
+          user_id: user.id,
+          type: 'chat_history',
+          data: { messages }
+        }, { onConflict: 'user_id,type' });
+        if (error) console.error(error);
+      }
+    }
+  };
+
   const handleSendMessage = async () => {
     if (!chatInput.trim()) return;
     
     const userMsg = chatInput;
     setChatInput('');
-    setChatMessages(prev => [...prev, { role: 'user', text: userMsg }]);
+    const newMessages = [...chatMessages, { role: 'user' as const, text: userMsg }];
+    setChatMessages(newMessages);
     setIsChatLoading(true);
     
     try {
@@ -40,22 +86,30 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
       `;
       
       const responseStream = await generateAIContentStream({
-        model: 'gemini-3.1-flash-lite-preview',
+        model: 'gemini-3-flash-preview',
         contents: `Context: ${context}\n\nUser Question: ${userMsg}\n\nYou are Cal.ai, an intelligent nutrition assistant. Provide a helpful, concise, and encouraging response based on the user's data. Use markdown for formatting.`,
       });
       
       setChatMessages(prev => [...prev, { role: 'model', text: '' }]);
       
+      let fullResponse = '';
       for await (const chunk of responseStream) {
+        fullResponse += chunk.text;
         setChatMessages(prev => {
-          const newMessages = [...prev];
-          newMessages[newMessages.length - 1].text += chunk.text;
-          return newMessages;
+          const updatedMessages = [...prev];
+          updatedMessages[updatedMessages.length - 1].text = fullResponse;
+          return updatedMessages;
         });
       }
+      
+      // Save after stream completes
+      saveChatHistory([...newMessages, { role: 'model', text: fullResponse }]);
+      
     } catch (error) {
       console.error('Chat error:', error);
-      setChatMessages(prev => [...prev, { role: 'model', text: 'Sorry, I encountered an error. Please try again.' }]);
+      const errorMessages = [...newMessages, { role: 'model' as const, text: 'Sorry, I encountered an error. Please try again.' }];
+      setChatMessages(errorMessages);
+      saveChatHistory(errorMessages);
     } finally {
       setIsChatLoading(false);
     }
@@ -119,6 +173,33 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
   const [isInsightLoading, setIsInsightLoading] = useState(false);
 
   useEffect(() => {
+    if (supabase) {
+      const loadAIData = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data, error } = await supabase
+            .from('ai_data')
+            .select('type, data')
+            .eq('user_id', user.id)
+            .in('type', ['insight', 'deep_analysis']);
+            
+          if (!error && data) {
+            data.forEach(row => {
+              if (row.type === 'insight' && !aiInsight && row.data.text) {
+                setAiInsight(row.data.text);
+              }
+              if (row.type === 'deep_analysis' && !deepAnalysis && row.data.text) {
+                setDeepAnalysis(row.data.text);
+              }
+            });
+          }
+        }
+      };
+      loadAIData();
+    }
+  }, [supabase]);
+
+  useEffect(() => {
     const fetchInsight = async () => {
       const currentData = JSON.stringify({ timeRange, efficiencyScore, consumedProtein, goal: profile?.goal });
       const lastData = localStorage.getItem('aiInsightData');
@@ -137,7 +218,7 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
           Goal: ${profile?.goal}
         `;
         const response = await generateAIContent({
-          model: 'gemini-3.1-flash-lite-preview',
+          model: 'gemini-3-flash-preview',
           contents: `Context: ${context}\n\nProvide a single, short, punchy sentence (max 15 words) of actionable advice or encouragement based on this nutrition data. Make it specific to their ${profile?.goal} goal.`,
         });
         if (response.text) {
@@ -145,6 +226,18 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
           localStorage.setItem('aiInsight', response.text);
           localStorage.setItem('aiInsightTime', new Date().getTime().toString());
           localStorage.setItem('aiInsightData', currentData);
+          
+          if (supabase) {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+              const { error: upsertError } = await supabase.from('ai_data').upsert({
+                user_id: user.id,
+                type: 'insight',
+                data: { text: response.text, currentData }
+              }, { onConflict: 'user_id,type' });
+              if (upsertError) console.error(upsertError);
+            }
+          }
         }
       } catch (e) {
         setAiInsight("Keep tracking your meals to get personalized insights!");
@@ -166,6 +259,28 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
     return null;
   });
   const [isDeepAnalyzing, setIsDeepAnalyzing] = useState(false);
+  const [isDeepAnalysisModalOpen, setIsDeepAnalysisModalOpen] = useState(false);
+  const reportRef = useRef<HTMLDivElement>(null);
+
+  const downloadPDF = async () => {
+    if (!reportRef.current) return;
+    try {
+      const canvas = await html2canvas(reportRef.current, {
+        scale: 2,
+        backgroundColor: '#0f172a', // match background-dark
+      });
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'px',
+        format: [canvas.width, canvas.height]
+      });
+      pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+      pdf.save(`Cal_ai_Report_${format(new Date(), 'yyyy-MM-dd')}.pdf`);
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+    }
+  };
 
   const fetchDeepAnalysis = async () => {
     setIsDeepAnalyzing(true);
@@ -179,7 +294,7 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
       `;
       
       const response = await generateAIContent({
-        model: 'gemini-3.1-flash-lite-preview',
+        model: 'gemini-3-flash-preview',
         contents: `Context: ${context}\n\nProvide a comprehensive "Deep Performance Analysis" for the user. 
         Include:
         1. Macro-nutrient balance analysis.
@@ -194,6 +309,18 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
         setDeepAnalysis(response.text);
         localStorage.setItem('deepAnalysis', response.text);
         localStorage.setItem('deepAnalysisTime', new Date().getTime().toString());
+        
+        if (supabase) {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            const { error: upsertError } = await supabase.from('ai_data').upsert({
+              user_id: user.id,
+              type: 'deep_analysis',
+              data: { text: response.text }
+            }, { onConflict: 'user_id,type' });
+            if (upsertError) console.error(upsertError);
+          }
+        }
       }
     } catch (error) {
       console.error('Deep analysis error:', error);
@@ -220,7 +347,6 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
   // Generate Weekly Activity Data
   const weeklyActivity = useMemo(() => {
     const days = [];
-    let maxBurn = 1; // Prevent division by zero
     
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
@@ -230,45 +356,26 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
       const dayEntries = entries.filter(e => e.timestamp.startsWith(dateStr) && e.type === 'activity');
       const burn = dayEntries.reduce((sum, e) => sum + Math.abs(e.calories), 0);
       
-      if (burn > maxBurn) maxBurn = burn;
-      days.push({ date: dateStr, burn });
+      days.push({ 
+        date: format(d, 'EEE'), // e.g., 'Mon'
+        burn,
+        fullDate: dateStr
+      });
     }
     
-    return days.map(d => ({
-      ...d,
-      heightPercent: Math.max(10, (d.burn / maxBurn) * 100) // Min 10% height for visual
-    }));
+    return days;
   }, [entries]);
 
-  // Generate SVG Path for Weight Chart
-  const chartPath = useMemo(() => {
-    if (weightHistory.length < 2) {
-      return "M0,120 C40,115 60,130 100,100 C140,70 160,85 200,60 C240,35 260,50 300,30 C340,10 360,25 400,15";
-    }
-    
-    const recentWeights = weightHistory.slice(-7); // Last 7 entries
-    if (recentWeights.length === 1) return "M0,75 L400,75";
-    
-    const maxW = Math.max(...recentWeights.map(w => w.weight));
-    const minW = Math.min(...recentWeights.map(w => w.weight));
-    const range = maxW - minW || 1; // Avoid div by 0
-    
-    const points = recentWeights.map((w, i) => {
-      const x = (i / (recentWeights.length - 1)) * 400;
-      // Y is inverted (0 is top, 150 is bottom), add padding
-      const y = 130 - ((w.weight - minW) / range) * 110; 
-      return `${x},${y}`;
-    });
-
-    // Create smooth curve
-    let d = `M${points[0]}`;
-    for (let i = 1; i < points.length; i++) {
-      const [prevX, prevY] = points[i-1].split(',').map(Number);
-      const [currX, currY] = points[i].split(',').map(Number);
-      const cp1x = prevX + (currX - prevX) / 2;
-      d += ` C${cp1x},${prevY} ${cp1x},${currY} ${currX},${currY}`;
-    }
-    return d;
+  const weightChartData = useMemo(() => {
+    if (weightHistory.length === 0) return [];
+    // Get last 30 days of weight history
+    const thirtyDaysAgo = subDays(new Date(), 30);
+    return weightHistory
+      .filter(w => new Date(w.date) >= thirtyDaysAgo)
+      .map(w => ({
+        date: format(parseISO(w.date), 'MMM dd'),
+        weight: w.weight
+      }));
   }, [weightHistory]);
 
   return (
@@ -380,23 +487,37 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
           </div>
           
           <div className="relative h-48 w-full mt-4">
-            {/* Simple SVG Chart Representation */}
-            <svg className="w-full h-full drop-shadow-[0_0_15px_rgba(255,255,255,0.2)]" viewBox="0 0 400 150" preserveAspectRatio="none">
-              <defs>
-                <linearGradient id="chartGradient" x1="0%" x2="0%" y1="0%" y2="100%">
-                  <stop offset="0%" stopColor="rgba(255,255,255,0.15)"></stop>
-                  <stop offset="100%" stopColor="rgba(255,255,255,0)"></stop>
-                </linearGradient>
-              </defs>
-              <path d={`${chartPath} L400,150 L0,150 Z`} fill="url(#chartGradient)"></path>
-              <path d={chartPath} fill="none" stroke="white" strokeLinecap="round" strokeWidth="2.5"></path>
-              <circle className="glow-dot" cx="400" cy={chartPath.split(',').pop()} fill="white" r="4"></circle>
-            </svg>
-            <div className="flex justify-between mt-6 px-1">
-              <span className="text-[10px] text-slate-600 font-bold uppercase tracking-widest">Mon</span>
-              <span className="text-[10px] text-slate-600 font-bold uppercase tracking-widest">Wed</span>
-              <span className="text-[10px] text-slate-600 font-bold uppercase tracking-widest">Fri</span>
-              <span className="text-[10px] text-primary font-bold uppercase tracking-widest underline underline-offset-4 decoration-primary/30">Sun</span>
+            {weightChartData.length > 1 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={weightChartData} margin={{ top: 10, right: 0, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="colorWeight" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <XAxis dataKey="date" hide />
+                  <YAxis domain={['dataMin - 2', 'dataMax + 2']} hide />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: '#1e1b4b', border: '1px solid rgba(139, 92, 246, 0.2)', borderRadius: '12px', color: '#fff' }}
+                    itemStyle={{ color: '#8b5cf6', fontWeight: 'bold' }}
+                    formatter={(value: number) => [`${value} kg`, 'Weight']}
+                  />
+                  <Area type="monotone" dataKey="weight" stroke="#8b5cf6" strokeWidth={3} fillOpacity={1} fill="url(#colorWeight)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-slate-500 text-sm">
+                Not enough data to show trend
+              </div>
+            )}
+            <div className="flex justify-between mt-2 px-1">
+              {weightChartData.length > 0 && (
+                <>
+                  <span className="text-[10px] text-slate-600 font-bold uppercase tracking-widest">{weightChartData[0].date}</span>
+                  <span className="text-[10px] text-primary font-bold uppercase tracking-widest underline underline-offset-4 decoration-primary/30">Today</span>
+                </>
+              )}
             </div>
           </div>
         </section>
@@ -461,18 +582,24 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
             <h3 className="text-sm font-semibold text-slate-200">Weekly Activity</h3>
             <span className="text-[10px] font-bold text-slate-500 uppercase">Last 7 Days</span>
           </div>
-          <div className="flex items-end justify-between h-24 gap-2">
-            {weeklyActivity.map((day, i) => (
-              <div 
-                key={i} 
-                className={`flex-1 rounded-lg relative group transition-all ${i === 6 ? 'bg-primary/80' : 'bg-white/10 hover:bg-white/20'}`}
-                style={{ height: `${day.heightPercent}%` }}
-              >
-                <div className="absolute -top-8 left-1/2 -translate-x-1/2 glass px-1.5 py-0.5 rounded text-[10px] opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
-                  {day.burn} kcal
-                </div>
-              </div>
-            ))}
+          <div className="h-40 w-full mt-4">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={weeklyActivity} margin={{ top: 10, right: 0, left: 0, bottom: 0 }}>
+                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10, fontWeight: 'bold' }} />
+                <Tooltip 
+                  cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+                  contentStyle={{ backgroundColor: '#1e1b4b', border: '1px solid rgba(139, 92, 246, 0.2)', borderRadius: '12px', color: '#fff' }}
+                  itemStyle={{ color: '#8b5cf6', fontWeight: 'bold' }}
+                  formatter={(value: number) => [`${value} kcal`, 'Burned']}
+                  labelStyle={{ color: '#94a3b8', marginBottom: '4px' }}
+                />
+                <Bar dataKey="burn" radius={[4, 4, 4, 4]}>
+                  {weeklyActivity.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={index === 6 ? '#8b5cf6' : 'rgba(255,255,255,0.1)'} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
           </div>
         </section>
 
@@ -500,17 +627,20 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
               <p className="text-sm text-primary/60 font-medium animate-pulse">AI is analyzing your habits...</p>
             </div>
           ) : deepAnalysis ? (
-            <div className="glass p-6 rounded-2xl border border-primary/20 bg-primary/5 animate-in fade-in slide-in-from-bottom-4">
-              <div className="flex justify-between items-center mb-4">
+            <div 
+              onClick={() => setIsDeepAnalysisModalOpen(true)}
+              className="glass p-6 rounded-2xl border border-primary/20 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors animate-in fade-in slide-in-from-bottom-4 group"
+            >
+              <div className="flex justify-between items-center mb-2">
                 <div className="flex items-center gap-2">
                   <span className="material-symbols-outlined text-primary">auto_awesome</span>
-                  <span className="text-xs font-bold uppercase tracking-widest text-primary">Deep Analysis</span>
+                  <span className="text-xs font-bold uppercase tracking-widest text-primary">Deep Analysis Ready</span>
                 </div>
-                <button onClick={fetchDeepAnalysis} className="text-[10px] text-slate-500 hover:text-primary transition-colors">Regenerate</button>
+                <span className="material-symbols-outlined text-slate-400 group-hover:text-primary transition-colors">open_in_new</span>
               </div>
-              <div className="markdown-body prose prose-invert prose-sm max-w-none">
-                <Markdown>{deepAnalysis}</Markdown>
-              </div>
+              <p className="text-sm text-slate-300 line-clamp-2">
+                Your comprehensive performance report is ready. Tap to view insights, consistency score, and predicted trends.
+              </p>
             </div>
           ) : (
             <div 
@@ -528,6 +658,50 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
           )}
         </section>
       </main>
+      
+      {/* Deep Analysis Modal */}
+      {isDeepAnalysisModalOpen && deepAnalysis && (
+        <div className="fixed inset-0 z-[100] flex flex-col bg-background-dark/95 backdrop-blur-xl animate-in fade-in duration-200">
+          <header className="flex items-center justify-between p-6 border-b border-white/10 sticky top-0 bg-background-dark/90 z-10">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full glass flex items-center justify-center">
+                <span className="material-symbols-outlined text-primary">analytics</span>
+              </div>
+              <div>
+                <h2 className="text-white font-bold tracking-tight">Performance Report</h2>
+                <p className="text-[10px] text-primary uppercase tracking-widest font-semibold">{format(new Date(), 'MMM dd, yyyy')}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={downloadPDF} className="w-10 h-10 rounded-full glass flex items-center justify-center hover:bg-white/10 transition-colors text-primary" title="Download PDF">
+                <span className="material-symbols-outlined text-xl">download</span>
+              </button>
+              <button onClick={() => setIsDeepAnalysisModalOpen(false)} className="w-10 h-10 rounded-full glass flex items-center justify-center hover:bg-white/10 transition-colors">
+                <span className="material-symbols-outlined text-xl">close</span>
+              </button>
+            </div>
+          </header>
+
+          <div className="flex-1 overflow-y-auto p-6 pb-24">
+            <div ref={reportRef} className="bg-background-dark p-6 rounded-2xl border border-white/10 shadow-2xl max-w-2xl mx-auto">
+              {/* Report Header for PDF */}
+              <div className="border-b border-white/10 pb-6 mb-6 text-center">
+                <h1 className="text-2xl font-bold text-white tracking-tight mb-2">Cal.ai Deep Analysis</h1>
+                <p className="text-sm text-slate-400">Prepared for {profile?.name || 'User'} • {format(new Date(), 'MMMM dd, yyyy')}</p>
+              </div>
+              
+              <div className="markdown-body prose prose-invert prose-sm max-w-none prose-headings:text-primary prose-a:text-primary">
+                <Markdown>{deepAnalysis}</Markdown>
+              </div>
+              
+              {/* Report Footer for PDF */}
+              <div className="border-t border-white/10 mt-8 pt-6 text-center">
+                <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Generated by Cal.ai Intelligence</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       
       {/* Fixed Bottom Navigation */}
       <nav className="fixed bottom-6 left-1/2 -translate-x-1/2 w-full max-w-[calc(100%-3rem)] md:max-w-sm z-50">
@@ -555,83 +729,95 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
       {/* Chatbot Modal */}
       {isChatOpen && (
         <div className="fixed inset-0 z-[100] flex flex-col bg-background-dark/95 backdrop-blur-xl animate-in fade-in duration-200">
-          <header className="flex items-center justify-between p-6 border-b border-white/10">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full glass flex items-center justify-center">
-                <span className="material-symbols-outlined text-primary">smart_toy</span>
+          <header className="flex items-center justify-between p-4 border-b border-white/5">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                <span className="material-symbols-outlined text-primary text-sm">auto_awesome</span>
               </div>
-              <div>
-                <h2 className="text-white font-bold tracking-tight">AI Coach</h2>
-                <p className="text-[10px] text-primary uppercase tracking-widest font-semibold">Online</p>
-              </div>
+              <h2 className="text-white font-medium text-sm">Cal.ai</h2>
             </div>
-            <button onClick={() => setIsChatOpen(false)} className="w-10 h-10 rounded-full glass flex items-center justify-center hover:bg-white/10 transition-colors">
+            <button onClick={() => setIsChatOpen(false)} className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors text-white/70">
               <span className="material-symbols-outlined text-xl">close</span>
             </button>
           </header>
 
-          <div className="flex-1 overflow-y-auto p-6 space-y-6">
-            <div className="flex gap-4">
-              <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
-                <span className="material-symbols-outlined text-primary text-sm">smart_toy</span>
-              </div>
-              <div className="bg-white/10 rounded-2xl rounded-tl-none p-4 text-sm text-white/90 leading-relaxed">
-                Hi! I'm your Cal.ai coach. I've analyzed your {timeRange} performance. Your efficiency score is {efficiencyScore}/100. How can I help you improve today?
-              </div>
-            </div>
-
-            {chatMessages.map((msg, i) => (
-              <div key={i} className={`flex gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === 'user' ? 'bg-primary text-background-dark' : 'bg-primary/20 text-primary'}`}>
-                  <span className="material-symbols-outlined text-sm">{msg.role === 'user' ? 'person' : 'smart_toy'}</span>
+          <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 max-w-3xl mx-auto w-full">
+            {chatMessages.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-center space-y-4 opacity-0 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+                  <span className="material-symbols-outlined text-primary text-3xl">auto_awesome</span>
                 </div>
-                <div className={`rounded-2xl p-4 text-sm leading-relaxed max-w-[85%] ${msg.role === 'user' ? 'bg-primary text-background-dark rounded-tr-none' : 'bg-white/10 text-white/90 rounded-tl-none'}`}>
-                  {msg.role === 'user' ? (
-                    msg.text
-                  ) : (
-                    <div className="markdown-body prose prose-invert prose-sm max-w-none">
-                      <Markdown>{msg.text}</Markdown>
+                <h3 className="text-2xl font-medium text-white">Hello, {profile?.name || 'there'}</h3>
+                <p className="text-white/50 max-w-md">I'm your AI nutrition coach. Ask me about your performance, diet, or how to reach your goals.</p>
+              </div>
+            ) : (
+              <>
+                <div className="flex gap-4 justify-start">
+                  <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-1">
+                    <span className="material-symbols-outlined text-primary text-sm">auto_awesome</span>
+                  </div>
+                  <div className="text-white/90 text-sm leading-relaxed">
+                    Hi! I'm your Cal.ai coach. I've analyzed your {timeRange} performance. Your efficiency score is {efficiencyScore}/100. How can I help you improve today?
+                  </div>
+                </div>
+
+                {chatMessages.map((msg, i) => (
+                  <div key={i} className={`flex gap-4 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    {msg.role === 'model' && (
+                      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-1">
+                        <span className="material-symbols-outlined text-primary text-sm">auto_awesome</span>
+                      </div>
+                    )}
+                    <div className={`max-w-[85%] md:max-w-[75%] ${msg.role === 'user' ? 'bg-white/10 text-white rounded-3xl rounded-tr-sm px-5 py-3 text-sm leading-relaxed' : 'text-white/90 text-sm leading-relaxed'}`}>
+                      {msg.role === 'user' ? (
+                        msg.text
+                      ) : (
+                        <div className="markdown-body prose prose-invert prose-sm max-w-none">
+                          <Markdown>{msg.text}</Markdown>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              </div>
-            ))}
-
-            {isChatLoading && (
-              <div className="flex gap-4">
-                <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
-                  <span className="material-symbols-outlined text-primary text-sm">smart_toy</span>
-                </div>
-                <div className="bg-white/10 rounded-2xl rounded-tl-none p-4 flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-white/50 animate-bounce"></span>
-                  <span className="w-2 h-2 rounded-full bg-white/50 animate-bounce" style={{ animationDelay: '0.2s' }}></span>
-                  <span className="w-2 h-2 rounded-full bg-white/50 animate-bounce" style={{ animationDelay: '0.4s' }}></span>
-                </div>
-              </div>
+                  </div>
+                ))}
+                
+                {isChatLoading && (
+                  <div className="flex gap-4 justify-start">
+                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-1">
+                      <span className="material-symbols-outlined text-primary text-sm">auto_awesome</span>
+                    </div>
+                    <div className="text-white/50 text-sm leading-relaxed flex items-center gap-1 py-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-white/50 animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                      <span className="w-1.5 h-1.5 rounded-full bg-white/50 animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                      <span className="w-1.5 h-1.5 rounded-full bg-white/50 animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                    </div>
+                  </div>
+                )}
+                <div ref={chatEndRef} />
+              </>
             )}
-            <div ref={chatEndRef} />
           </div>
 
-          <div className="p-4 border-t border-white/10 bg-background-dark">
+          <div className="p-4 md:p-6 max-w-3xl mx-auto w-full">
             <form 
               onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }}
-              className="flex items-center gap-2 glass rounded-full p-2"
+              className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-full p-2 pl-6 focus-within:border-primary/50 focus-within:bg-white/10 transition-all"
             >
               <input
                 type="text"
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
-                placeholder="Ask about your performance..."
-                className="flex-1 bg-transparent border-none px-4 text-sm text-white focus:outline-none placeholder:text-white/30"
+                placeholder="Ask Cal.ai..."
+                className="flex-1 bg-transparent border-none text-sm text-white focus:outline-none placeholder:text-white/30"
               />
               <button 
                 type="submit"
                 disabled={!chatInput.trim() || isChatLoading}
-                className="w-10 h-10 rounded-full bg-primary text-background-dark flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+                className="w-10 h-10 rounded-full bg-white/10 text-white flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed hover:bg-white/20 transition-colors"
               >
-                <span className="material-symbols-outlined text-xl">send</span>
+                <span className="material-symbols-outlined text-lg">arrow_upward</span>
               </button>
             </form>
+            <p className="text-center text-[10px] text-white/30 mt-3">Cal.ai can make mistakes. Consider verifying important information.</p>
           </div>
         </div>
       )}

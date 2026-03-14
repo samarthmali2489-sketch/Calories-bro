@@ -1,27 +1,38 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useAppContext } from '../context/AppContext';
+import { UserProfile } from '../types';
 
 interface ProfileProps {
   onNavigate: (screen: string) => void;
 }
 
 export default function Profile({ onNavigate }: ProfileProps) {
-  const { profile, logout, notifications } = useAppContext();
+  const { profile, setProfile, logout, notifications } = useAppContext();
   const unreadCount = notifications.filter(n => !n.read).length;
+  const [isEditing, setIsEditing] = useState(false);
+  const [editForm, setEditForm] = useState<UserProfile | null>(profile);
 
-  if (!profile) return null;
+  if (!profile || !editForm) return null;
+
+  const handleSave = () => {
+    setProfile(editForm);
+    setIsEditing(false);
+  };
 
   return (
     <div className="relative flex min-h-[100dvh] w-full flex-col bg-background-dark overflow-x-hidden pb-24 max-w-md mx-auto">
       <header className="flex items-center justify-between px-6 pt-8 pb-4 sticky top-0 z-50 bg-background-dark/80 backdrop-blur-md">
         <h1 className="text-xl font-bold tracking-tight text-primary">Profile</h1>
         <div className="flex gap-2">
-          <button onClick={() => onNavigate('notifications')} className="w-10 h-10 rounded-full glass flex items-center justify-center hover:bg-white/10 transition-colors relative">
-            <span className="material-symbols-outlined text-xl">notifications</span>
-            {unreadCount > 0 && (
-              <span className="absolute top-0 right-0 size-3 bg-red-500 rounded-full border-2 border-background-dark"></span>
-            )}
-          </button>
+          {isEditing ? (
+            <button onClick={handleSave} className="px-4 h-10 rounded-full bg-primary text-background-dark font-bold flex items-center justify-center hover:bg-white transition-colors">
+              Save
+            </button>
+          ) : (
+            <button onClick={() => setIsEditing(true)} className="px-4 h-10 rounded-full glass flex items-center justify-center hover:bg-white/10 transition-colors">
+              Edit
+            </button>
+          )}
           <button onClick={() => onNavigate('dashboard')} className="w-10 h-10 rounded-full glass flex items-center justify-center hover:bg-white/10 transition-colors">
             <span className="material-symbols-outlined text-xl">close</span>
           </button>
@@ -30,15 +41,43 @@ export default function Profile({ onNavigate }: ProfileProps) {
 
       <main className="px-6 space-y-6">
         <div className="flex flex-col items-center mt-6">
-          <div className="size-24 rounded-full border-2 border-primary/20 p-1 overflow-hidden mb-4">
+          <div className="size-24 rounded-full border-2 border-primary/20 p-1 overflow-hidden mb-4 relative group">
             <img 
               alt="User Profile" 
               className="w-full h-full object-cover rounded-full" 
               src="https://lh3.googleusercontent.com/aida-public/AB6AXuDJImYj5jq8_EQ_cjnysvMaynI_lkpzfhDr8sYTX5vPngd-wBoNQvuPufCjmm4neXwfBSJhRjgsUSe4Tw9hBDdr5E_v1wawc2q2fmLsXQ8UMFIWtllY3sh7d2ZouHdTk17A2U2mHr3ew39RJmZuje1Rp8u2-QHAe8XVPkKwMdR2nDULCdW_mlI3JD3VgymSdXyon6opN0dFdjINI4OeGpsaWZKKAYpE6etkLPkf2JyeCWhYHEF2v9uR8yl4giUEE5JDYxD9qJgHgRY"
             />
+            {isEditing && (
+              <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center cursor-pointer">
+                <span className="material-symbols-outlined text-white">photo_camera</span>
+              </div>
+            )}
           </div>
-          <h2 className="text-2xl font-bold">{profile.name}</h2>
-          <p className="text-slate-400 capitalize">{profile.goal.replace('-', ' ')} Goal</p>
+          
+          {isEditing ? (
+            <input 
+              type="text" 
+              value={editForm.name} 
+              onChange={e => setEditForm({...editForm, name: e.target.value})}
+              className="text-2xl font-bold bg-transparent border-b border-primary/50 text-center focus:outline-none focus:border-primary w-48"
+            />
+          ) : (
+            <h2 className="text-2xl font-bold">{profile.name}</h2>
+          )}
+          
+          {isEditing ? (
+            <select 
+              value={editForm.goal}
+              onChange={e => setEditForm({...editForm, goal: e.target.value as any})}
+              className="mt-2 bg-white/5 border border-white/10 rounded-lg px-3 py-1 text-sm text-slate-300 focus:outline-none"
+            >
+              <option value="loss">Loss Goal</option>
+              <option value="maintain">Maintain Goal</option>
+              <option value="gain">Gain Goal</option>
+            </select>
+          ) : (
+            <p className="text-slate-400 capitalize">{profile.goal.replace('-', ' ')} Goal</p>
+          )}
         </div>
 
         <section className="space-y-4">
@@ -46,15 +85,27 @@ export default function Profile({ onNavigate }: ProfileProps) {
           <div className="glass rounded-2xl overflow-hidden">
             <div className="p-4 border-b border-white/5 flex justify-between items-center">
               <span className="text-slate-300">Age</span>
-              <span className="font-semibold">{profile.age}</span>
+              {isEditing ? (
+                <input type="number" value={editForm.age} onChange={e => setEditForm({...editForm, age: Number(e.target.value)})} className="w-16 bg-white/5 border border-white/10 rounded px-2 py-1 text-right focus:outline-none focus:border-primary" />
+              ) : (
+                <span className="font-semibold">{profile.age}</span>
+              )}
             </div>
             <div className="p-4 border-b border-white/5 flex justify-between items-center">
-              <span className="text-slate-300">Height</span>
-              <span className="font-semibold">{profile.height} cm</span>
+              <span className="text-slate-300">Height (cm)</span>
+              {isEditing ? (
+                <input type="number" value={editForm.height} onChange={e => setEditForm({...editForm, height: Number(e.target.value)})} className="w-16 bg-white/5 border border-white/10 rounded px-2 py-1 text-right focus:outline-none focus:border-primary" />
+              ) : (
+                <span className="font-semibold">{profile.height} cm</span>
+              )}
             </div>
             <div className="p-4 flex justify-between items-center">
-              <span className="text-slate-300">Weight</span>
-              <span className="font-semibold">{profile.weight} kg</span>
+              <span className="text-slate-300">Weight (kg)</span>
+              {isEditing ? (
+                <input type="number" value={editForm.weight} onChange={e => setEditForm({...editForm, weight: Number(e.target.value)})} className="w-16 bg-white/5 border border-white/10 rounded px-2 py-1 text-right focus:outline-none focus:border-primary" />
+              ) : (
+                <span className="font-semibold">{profile.weight} kg</span>
+              )}
             </div>
           </div>
         </section>

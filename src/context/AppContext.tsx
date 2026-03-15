@@ -269,7 +269,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       try {
         const response = await generateAIContent({
-          model: 'gemini-3-flash-preview',
+          model: 'gemini-3.1-flash-lite-preview',
           contents: `User Profile: ${JSON.stringify(profile)}\n\nCalculate the optimal daily calorie and macro targets (protein, carbs, fats) for this user based on their profile and goal. Provide the results in JSON format.`,
           config: {
             responseMimeType: 'application/json',

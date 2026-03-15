@@ -178,7 +178,7 @@ export default function Scanner({ onNavigate, initialMode = 'scanner' }: Scanner
 
       // Call Server-side AI API
       const response = await generateAIContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-3.1-flash-lite-preview',
         contents: {
           parts: [
             {

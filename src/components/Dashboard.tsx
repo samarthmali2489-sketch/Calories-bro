@@ -56,7 +56,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
           Time: ${new Date().toLocaleTimeString()}
         `;
         const response = await generateAIContent({
-          model: 'gemini-3-flash-preview',
+          model: 'gemini-3.1-flash-lite-preview',
           contents: `Context: ${context}\n\nProvide a 3-word status for the user's progress today (e.g. "On Track", "Need More Protein", "Perfect Balance").`,
         });
         if (response.text) {

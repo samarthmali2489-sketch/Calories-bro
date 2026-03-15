@@ -86,7 +86,7 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
       `;
       
       const responseStream = await generateAIContentStream({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-3.1-flash-lite-preview',
         contents: `Context: ${context}\n\nUser Question: ${userMsg}\n\nYou are Cal.ai, an intelligent nutrition assistant. Provide a helpful, concise, and encouraging response based on the user's data. Use markdown for formatting.`,
       });
       
@@ -218,7 +218,7 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
           Goal: ${profile?.goal}
         `;
         const response = await generateAIContent({
-          model: 'gemini-3-flash-preview',
+          model: 'gemini-3.1-flash-lite-preview',
           contents: `Context: ${context}\n\nProvide a single, short, punchy sentence (max 15 words) of actionable advice or encouragement based on this nutrition data. Make it specific to their ${profile?.goal} goal.`,
         });
         if (response.text) {
@@ -294,7 +294,7 @@ export default function Analytics({ onNavigate }: AnalyticsProps) {
       `;
       
       const response = await generateAIContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-3.1-flash-lite-preview',
         contents: `Context: ${context}\n\nProvide a comprehensive "Deep Performance Analysis" for the user. 
         Include:
         1. Macro-nutrient balance analysis.

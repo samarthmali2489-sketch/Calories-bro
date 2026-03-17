@@ -2,7 +2,6 @@ import React, { createContext, useContext, useState, useEffect, useMemo } from '
 import { UserProfile, MacroTarget, Entry, WeightEntry, User, AppNotification } from '../types';
 import { supabase } from '../lib/supabase';
 import { generateAIContent } from '../lib/ai';
-import { Type } from '@google/genai';
 
 interface AppState {
   user: User | null;
@@ -270,24 +269,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       try {
         const response = await generateAIContent({
           model: 'gemini-3.1-flash-lite-preview',
-          contents: `User Profile: ${JSON.stringify(profile)}\n\nCalculate the optimal daily calorie and macro targets (protein, carbs, fats) for this user based on their profile and goal. Provide the results in JSON format.`,
+          contents: `User Profile: ${JSON.stringify(profile)}\n\nCalculate the optimal daily calorie and macro targets (protein, carbs, fats) for this user based on their profile and goal. Provide the results in JSON format.\n\nReturn ONLY a JSON object with the following keys: calories (number), protein (number), carbs (number), fats (number).`,
           config: {
             responseMimeType: 'application/json',
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                calories: { type: Type.INTEGER },
-                protein: { type: Type.INTEGER },
-                carbs: { type: Type.INTEGER },
-                fats: { type: Type.INTEGER },
-              },
-              required: ['calories', 'protein', 'carbs', 'fats'],
-            },
           },
         });
 
         if (response.text) {
-          const aiTargets = JSON.parse(response.text);
+          const text = response.text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+          const aiTargets = JSON.parse(text);
           setTargets(aiTargets);
           localStorage.setItem('macroTargets', JSON.stringify(aiTargets));
           localStorage.setItem('lastProfileKey', profileKey);

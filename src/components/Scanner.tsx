@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { generateAIContent } from '../lib/ai';
-import { Type } from '@google/genai';
 
 interface ScannerProps {
   onNavigate: (screen: string) => void;
@@ -192,28 +191,18 @@ export default function Scanner({ onNavigate, initialMode = 'scanner' }: Scanner
                 contextDetails || contextAmount 
                   ? `The user provided this additional context: ${contextDetails ? 'Dish Name: ' + contextDetails + '. ' : ''}${contextAmount ? 'Quantity/Ingredients breakdown: ' + contextAmount + '.' : ''} Please strictly use this context to calculate a highly accurate nutritional breakdown, especially if specific weights or ingredients are provided.` 
                   : ''
-              }`,
+              }\n\nReturn ONLY a JSON object with the following keys: name (string), calories (number), protein (number), carbs (number), fats (number).`,
             },
           ],
         },
         config: {
           responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              name: { type: Type.STRING, description: 'Name of the food' },
-              calories: { type: Type.INTEGER, description: 'Estimated total calories' },
-              protein: { type: Type.INTEGER, description: 'Estimated protein in grams' },
-              carbs: { type: Type.INTEGER, description: 'Estimated carbohydrates in grams' },
-              fats: { type: Type.INTEGER, description: 'Estimated fats in grams' },
-            },
-            required: ['name', 'calories', 'protein', 'carbs', 'fats'],
-          },
         },
       });
 
       if (response.text) {
-        const result = JSON.parse(response.text);
+        const text = response.text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+        const result = JSON.parse(text);
         setScannedFood(result);
       }
       setIsAnalyzing(false);

@@ -1,58 +1,74 @@
-import { GoogleGenAI } from "@google/genai";
-
-function getApiKey() {
-  // Vite replaces process.env.GEMINI_API_KEY at build time via the define config
-  try {
-    const key = process.env.GEMINI_API_KEY;
-    if (key && key !== "undefined") return key;
-  } catch (e) {
-    // Ignore ReferenceError if process is not defined and Vite didn't replace it
-  }
-
-  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_GEMINI_API_KEY) {
-    return import.meta.env.VITE_GEMINI_API_KEY;
-  }
-  
-  return "";
-}
-
 export async function generateAIContent(params: {
   model?: string;
   contents: any;
   config?: any;
 }): Promise<{ text: string }> {
-  const apiKey = getApiKey();
-  
-  if (!apiKey) {
-    throw new Error("Gemini API key is missing. Please paste your key in src/lib/ai.ts");
+  const response = await fetch('/api/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
   }
 
-  const ai = new GoogleGenAI({ apiKey });
-  const response = await ai.models.generateContent({
-    model: params.model || "gemini-3.1-flash-lite-preview",
-    contents: params.contents,
-    config: params.config,
-  });
-  
-  return { text: response.text || "" };
+  return await response.json();
 }
 
-export async function generateAIContentStream(params: {
+export async function* generateAIContentStream(params: {
   model?: string;
   contents: any;
   config?: any;
 }) {
-  const apiKey = getApiKey();
-  
-  if (!apiKey) {
-    throw new Error("Gemini API key is missing. Please paste your key in src/lib/ai.ts");
+  const response = await fetch('/api/generate-stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
   }
 
-  const ai = new GoogleGenAI({ apiKey });
-  return ai.models.generateContentStream({
-    model: params.model || "gemini-3.1-flash-lite-preview",
-    contents: params.contents,
-    config: params.config,
-  });
+  if (!response.body) {
+    throw new Error('ReadableStream not yet supported in this browser.');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    
+    // Keep the last partial line in the buffer
+    buffer = lines.pop() || '';
+    
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        const data = line.slice(6);
+        if (data === '[DONE]') {
+          return;
+        }
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.error) {
+            throw new Error(parsed.error);
+          }
+          if (parsed.text) {
+            yield { text: parsed.text };
+          }
+        } catch (e) {
+          // Ignore parse errors for incomplete chunks
+        }
+      }
+    }
+  }
 }
 
